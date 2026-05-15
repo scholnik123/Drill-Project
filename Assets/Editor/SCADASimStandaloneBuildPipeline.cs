@@ -21,8 +21,8 @@ namespace SCADASim.EditorTools
         private const string AIAssistantAssetPath = "Assets/Resources/Models/aiAssistant.fbx";
         private const string CompanyIntroVideoPath = "Assets/StreamingAssets/CompanyIntro.mp4";
         private const string MusicStreamingDirectory = "Assets/StreamingAssets/Music";
-        private const string BuildDirectory = "Builds/SCADA_Intelligent_Simulation_v3";
-        private const string WindowsBuildPath = BuildDirectory + "/SCADA_Intelligent_Simulation_v3.exe";
+        private const string BuildDirectory = "Builds/SCADA_Intelligent_Simulation_v4";
+        private const string WindowsBuildPath = BuildDirectory + "/SCADA_Intelligent_Simulation_v4.exe";
 
         [MenuItem("SCADA Simulation/Prepare Standalone Scene")]
         public static void PrepareStandaloneScene()
@@ -88,11 +88,11 @@ namespace SCADASim.EditorTools
         private static void ConfigurePlayerSettings()
         {
             PlayerSettings.companyName = "SCADA Simulation Lab";
-            PlayerSettings.productName = "SCADA Intelligent Simulation v3.0";
-            PlayerSettings.applicationIdentifier = "com.scadasim.intelligent.v3";
+            PlayerSettings.productName = "SCADA Intelligent Simulation v4";
+            PlayerSettings.applicationIdentifier = "com.scadasim.intelligent.v4";
             PlayerSettings.runInBackground = true;
-            PlayerSettings.defaultScreenWidth = 1600;
-            PlayerSettings.defaultScreenHeight = 900;
+            PlayerSettings.defaultScreenWidth = 1920;
+            PlayerSettings.defaultScreenHeight = 1080;
             PlayerSettings.fullScreenMode = FullScreenMode.Windowed;
             PlayerSettings.resizableWindow = true;
             PlayerSettings.visibleInBackground = true;

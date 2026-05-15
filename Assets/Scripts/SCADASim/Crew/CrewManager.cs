@@ -588,9 +588,25 @@ namespace SCADASim.Crew
             {
                 type = CrewIncidentType.WrongMudWeight;
             }
-            else
+            else if (roll < 0.96f)
             {
                 type = CrewIncidentType.UnsafeRamp;
+            }
+            else if (roll < 0.975f)
+            {
+                type = CrewIncidentType.ToolfaceDrift;
+            }
+            else if (roll < 0.988f)
+            {
+                type = CrewIncidentType.PumpLag;
+            }
+            else if (roll < 0.996f)
+            {
+                type = CrewIncidentType.MissedGasTrend;
+            }
+            else
+            {
+                type = CrewIncidentType.RadioMiscommunication;
             }
 
             RaiseIncident(new CrewIncident
@@ -659,6 +675,14 @@ namespace SCADASim.Crew
                     return "Плотность раствора замерена с ошибкой. Растет риск выхода из окна давлений.";
                 case CrewIncidentType.UnsafeRamp:
                     return "Слишком резкое изменение параметров. Возросла ударная нагрузка на КНБК.";
+                case CrewIncidentType.ToolfaceDrift:
+                    return "ННБ поздно подтвердил положение toolface. Возможен уход от плановой траектории.";
+                case CrewIncidentType.PumpLag:
+                    return "Насосная бригада запоздала с подтверждением расхода. Давление и выход нужно перепроверить.";
+                case CrewIncidentType.MissedGasTrend:
+                    return "Газовый тренд заметили с задержкой. Проверьте дегазатор, емкости и окно давлений.";
+                case CrewIncidentType.RadioMiscommunication:
+                    return "Сбой связи между бурильщиком и раствором. Команды могут выполняться с задержкой.";
                 default:
                     return "Бригада допустила отклонение от безопасной процедуры.";
             }

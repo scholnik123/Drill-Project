@@ -93,6 +93,10 @@ namespace SCADASim.Bootstrap
             EdgeAIModule edgeAI = aiObject.AddComponent<EdgeAIModule>();
             edgeAI.Configure(drillingModel, crewManager, eventChannel);
 
+            GameObject crewAIObject = new GameObject("AI Crew Advisor Module");
+            AICrewAdvisorModule crewAI = crewAIObject.AddComponent<AICrewAdvisorModule>();
+            crewAI.Configure(drillingModel, crewManager, eventChannel);
+
             GameObject musicObject = new GameObject("SCADA Music Player");
             ScadaMusicPlayer musicPlayer = musicObject.AddComponent<ScadaMusicPlayer>();
 
@@ -116,7 +120,11 @@ namespace SCADASim.Bootstrap
             drillingModel.SetSimulating(false);
             Debug.Log("SCADA bootstrap ready: start UI is visible, 3D assets load after configuration.");
             StartCoroutine(CreateAssistantPortraitAfterFirstFrame(ui));
-            if (HasCommandLineArgument("--capture-dashboard"))
+            if (HasCommandLineArgument("--capture-profile"))
+            {
+                StartCoroutine(CaptureProfileFrame(ui));
+            }
+            else if (HasCommandLineArgument("--capture-dashboard"))
             {
                 StartCoroutine(CaptureDashboardFrame(ui));
             }
@@ -157,6 +165,26 @@ namespace SCADASim.Bootstrap
             string path = Path.Combine(Application.persistentDataPath, "dashboard_probe.png");
             ScreenCapture.CaptureScreenshot(path);
             Debug.Log($"SCADA dashboard capture written: {path}");
+
+            if (HasCommandLineArgument("--quit-after-capture"))
+            {
+                yield return new WaitForSecondsRealtime(0.5f);
+                Application.Quit();
+            }
+        }
+
+        private IEnumerator CaptureProfileFrame(ScadaDashboardUI ui)
+        {
+            yield return null;
+
+            ui.DebugStartProfileSessionForCapture();
+
+            yield return new WaitForEndOfFrame();
+            yield return new WaitForEndOfFrame();
+
+            string path = Path.Combine(Application.persistentDataPath, "profile_probe.png");
+            ScreenCapture.CaptureScreenshot(path);
+            Debug.Log($"SCADA profile capture written: {path}");
 
             if (HasCommandLineArgument("--quit-after-capture"))
             {

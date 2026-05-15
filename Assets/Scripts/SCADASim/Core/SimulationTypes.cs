@@ -36,7 +36,11 @@ namespace SCADASim.Core
         DelayedResponse,
         WrongMudWeight,
         MissedFlowDrop,
-        UnsafeRamp
+        UnsafeRamp,
+        ToolfaceDrift,
+        PumpLag,
+        MissedGasTrend,
+        RadioMiscommunication
     }
 
     public enum CrewActionType
@@ -64,7 +68,14 @@ namespace SCADASim.Core
         Kick,
         DifferentialSticking,
         BitWearLimit,
-        PoorHoleCleaning
+        PoorHoleCleaning,
+        GasCutMud,
+        MwdSignalLoss,
+        TopDriveOverload,
+        PumpEfficiencyDrop,
+        ShakerOverflow,
+        SevereWeather,
+        DrillStringWashout
     }
 
     public enum DrillingCommandType
@@ -119,6 +130,14 @@ namespace SCADASim.Core
         PressureWindow,
         CrewHandover,
         PumpEfficiency,
+        GasMonitoring,
+        ToolfaceControl,
+        PumpIntegrity,
+        EquipmentInspection,
+        WeatherResponse,
+        MwdSurvey,
+        TorqueSmoothing,
+        ConnectionProcedure,
         ShiftPlan
     }
 

@@ -14,7 +14,8 @@ namespace SCADASim.Core
         OperationalIncident,
         SupervisorTask,
         SupervisorTaskResult,
-        EdgeAIAlert
+        EdgeAIAlert,
+        CrewAIAlert
     }
 
     public enum AlertSeverity

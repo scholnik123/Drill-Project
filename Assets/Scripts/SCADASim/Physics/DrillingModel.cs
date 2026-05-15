@@ -2,6 +2,7 @@ using System;
 using SCADASim.Core;
 using SCADASim.Crew;
 using SCADASim.Trajectory;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace SCADASim.Physics
@@ -41,6 +42,9 @@ namespace SCADASim.Physics
         private int successfulSupervisorTasks;
         private int failedSupervisorTasks;
         private bool simulationStateWasSetExplicitly;
+        private bool hasLastSupervisorTaskType;
+        private SupervisorTaskType lastSupervisorTaskType;
+        private SimulationRuntimeConfig runtimeConfig = SimulationRuntimeConfig.Default;
         private CrewManager subscribedCrew;
 
         public event Action<DrillingState> StateUpdated;
@@ -82,6 +86,7 @@ namespace SCADASim.Physics
 
         public void ApplyRuntimeConfig(SimulationRuntimeConfig config, GeologyModel geology)
         {
+            runtimeConfig = config;
             geologyModel = geology;
             physicsConfig?.ApplyRuntimeConfig(config);
             InitializeState();
@@ -270,6 +275,7 @@ namespace SCADASim.Physics
         private void ResetSupervisorTasks(float delaySeconds)
         {
             hasActiveSupervisorTask = false;
+            hasLastSupervisorTaskType = false;
             supervisorTaskSequence = 0;
             supervisorClockSeconds = 0f;
             nextSupervisorTaskTime = supervisorClockSeconds + delaySeconds;
@@ -346,13 +352,13 @@ namespace SCADASim.Physics
             state.DragTonnes = CalculateDrag(zone, trajectory, crew);
             state.CuttingsTransportEfficiency01 = CalculateCuttingsTransport(zone, trajectory, crew);
             state.Vibration = CalculateVibration(zone, trajectory, crew);
-            state.SurfaceTorqueKnM = CalculateTorque(zone, trajectory);
-            state.StandpipePressureBar = CalculateStandpipePressure(zone, trajectory);
+            state.SurfaceTorqueKnM = BlendSensor(state.SurfaceTorqueKnM, CalculateTorque(zone, trajectory), deltaTime, 1.6f);
+            state.StandpipePressureBar = BlendSensor(state.StandpipePressureBar, CalculateStandpipePressure(zone, trajectory), deltaTime, 1.1f);
             CalculatePressureWindow(zone, trajectory);
             state.LostCirculationRisk01 = CalculateLostCirculationRisk(zone);
             state.KickRisk01 = CalculateKickRisk(zone, crew);
-            state.FlowOutLps = CalculateReturnFlow();
-            state.RopMPerHour = CalculateRop(zone, trajectory, crew);
+            state.FlowOutLps = BlendSensor(state.FlowOutLps, CalculateReturnFlowTarget(), deltaTime, 0.8f);
+            state.RopMPerHour = BlendSensor(state.RopMPerHour, CalculateRop(zone, trajectory, crew), deltaTime, 0.9f);
             state.HookLoadTonnes = physicsConfig.BaseHookLoadTonnes + state.DragTonnes * 0.65f;
             state.StuckPipeRisk01 = CalculateStuckPipeRisk(zone, trajectory, crew);
             state.BoreholeInstabilityRisk01 = CalculateInstabilityRisk(zone, crew);
@@ -388,6 +394,17 @@ namespace SCADASim.Physics
                 state);
         }
 
+        private static float BlendSensor(float current, float target, float deltaTime, float responsePerSecond)
+        {
+            if (Mathf.Abs(current) < 0.001f)
+            {
+                return target;
+            }
+
+            float alpha = 1f - Mathf.Exp(-Mathf.Max(0.01f, responsePerSecond) * Mathf.Max(0f, deltaTime));
+            return Mathf.Lerp(current, target, alpha);
+        }
+
         private float CalculateRop(LithologyZone zone, TrajectorySample trajectory, CrewInfluence crew)
         {
             float rpmFactor = Mathf.Lerp(0.25f, 1.15f, Mathf.InverseLerp(35f, 180f, state.Rpm));
@@ -402,9 +419,9 @@ namespace SCADASim.Physics
             float cleaningPenalty = Mathf.Lerp(0.62f, 1.08f, state.CuttingsTransportEfficiency01);
             float bitWearPenalty = Mathf.Lerp(1f, 0.42f, state.BitWear01);
             float microLithologyFactor = Mathf.Lerp(
-                0.9f,
-                1.1f,
-                Mathf.PerlinNoise(Time.time * 0.05f, state.MeasuredDepth * 0.015f));
+                0.95f,
+                1.05f,
+                Mathf.PerlinNoise(Time.time * 0.035f, state.MeasuredDepth * 0.012f));
 
             return Mathf.Max(
                 0.2f,
@@ -447,8 +464,8 @@ namespace SCADASim.Physics
                                      (0.1f + Mathf.Sin(trajectory.InclinationDegrees * Mathf.Deg2Rad) * 0.18f) *
                                      (1f + trajectory.DoglegSeverityDegPer30m * physicsConfig.DoglegTorqueGain);
             float bitWearTorque = Mathf.Lerp(0f, 7.5f, state.BitWear01) * Mathf.InverseLerp(6f, 26f, state.WeightOnBitTonnes);
-            float stickSlipOscillation = Mathf.Sin(Time.time * 2.1f) * state.Vibration.LowFrequencyEnergy * 2.4f;
-            float measurementNoise = (Mathf.PerlinNoise(Time.time * 0.75f, state.MeasuredDepth * 0.01f) - 0.5f) * 1.2f;
+            float stickSlipOscillation = Mathf.Sin(Time.time * 1.7f) * state.Vibration.LowFrequencyEnergy * 1.6f;
+            float measurementNoise = (Mathf.PerlinNoise(Time.time * 0.45f, state.MeasuredDepth * 0.008f) - 0.5f) * 0.45f;
 
             return physicsConfig.BaseBitTorqueKnM +
                    rockTorque +
@@ -466,14 +483,14 @@ namespace SCADASim.Physics
             float flowRatio = Mathf.Max(0.1f, state.FlowRateLps / 38f);
             float depthFactor = 1f + state.MeasuredDepth / 2400f;
             float mudDensityFactor = Mathf.Lerp(0.82f, 1.35f, Mathf.InverseLerp(0.95f, 1.45f, state.MudWeightSG));
-            float flowPressure = Mathf.Pow(flowRatio, 1.86f) * 36f * depthFactor * mudDensityFactor;
-            float cuttingsLoading = (1f - state.CuttingsTransportEfficiency01) * (1f + trajectory.InclinationDegrees / 90f) * 36f;
-            float lithologyRestriction = zone.Stickiness01 * 7f + zone.Instability01 * 5f;
+            float flowPressure = Mathf.Pow(flowRatio, 1.82f) * 34f * depthFactor * mudDensityFactor;
+            float cuttingsLoading = (1f - state.CuttingsTransportEfficiency01) * (1f + trajectory.InclinationDegrees / 90f) * 30f;
+            float lithologyRestriction = zone.Stickiness01 * 5f + zone.Instability01 * 3.5f;
             float packOff = state.StuckPipeRisk01 * physicsConfig.PressureTrendRiskGain * 100f;
             float chokeBackPressure = Mathf.Pow(1f - state.ChokeOpening01, 1.7f) * 22f;
             float rampPulse = commandRampEnergy * Mathf.Lerp(1.5f, 4.5f, flowRatio);
-            float pumpPulse = Mathf.Sin(Time.time * 3.8f) * Mathf.Lerp(0.3f, 1.2f, flowRatio);
-            float formationNoise = (Mathf.PerlinNoise(Time.time * 0.22f, state.MeasuredDepth * 0.006f) - 0.5f) * 2.4f;
+            float pumpPulse = Mathf.Sin(Time.time * 2.4f) * Mathf.Lerp(0.18f, 0.65f, flowRatio);
+            float formationNoise = (Mathf.PerlinNoise(Time.time * 0.12f, state.MeasuredDepth * 0.005f) - 0.5f) * 0.9f;
 
             return physicsConfig.BaseStandpipePressureBar + flowPressure + cuttingsLoading + lithologyRestriction + packOff + chokeBackPressure + rampPulse + pumpPulse + formationNoise;
         }
@@ -616,11 +633,11 @@ namespace SCADASim.Physics
             return (0.0000015f + abrasiveLoad * 0.000006f + wobLoad * rpmLoad * 0.000003f + vibrationLoad * 0.000002f) * maintenancePenalty;
         }
 
-        private float CalculateReturnFlow()
+        private float CalculateReturnFlowTarget()
         {
-            float losses = Mathf.Lerp(0f, 0.42f, Mathf.Clamp01(state.LostCirculationRisk01 + lostCirculationBias));
-            float influx = Mathf.Lerp(0f, 0.22f, Mathf.Clamp01(state.KickRisk01 + gasInfluxBias));
-            float transientNoise = Mathf.PerlinNoise(Time.time * 0.13f, state.MeasuredDepth * 0.002f) * 0.025f - 0.012f;
+            float losses = Mathf.Lerp(0f, 0.32f, Mathf.Clamp01(state.LostCirculationRisk01 + lostCirculationBias));
+            float influx = Mathf.Lerp(0f, 0.18f, Mathf.Clamp01(state.KickRisk01 + gasInfluxBias));
+            float transientNoise = Mathf.PerlinNoise(Time.time * 0.08f, state.MeasuredDepth * 0.002f) * 0.012f - 0.006f;
             return Mathf.Max(0f, state.FlowRateLps * (1f - losses + influx + transientNoise));
         }
 
@@ -668,63 +685,289 @@ namespace SCADASim.Physics
 
             if (current.KickRisk01 > 0.74f)
             {
-                gasInfluxBias = Mathf.Clamp01(gasInfluxBias + 0.18f);
-                RaiseOperationalIncident(new OperationalIncident(
-                    OperationalIncidentType.Kick,
-                    AlertSeverity.Critical,
-                    "Приток флюида",
-                    "Расход на выходе выше входа, газопоказания растут, забойное давление ниже пластового.",
-                    "Немедленно стабилизировать скважину: прикрыть штуцер, поднять плотность раствора, остановить наращивание параметров. Простои +18 мин.",
-                    current.MeasuredDepth));
+                RaiseOperationalIncident(BuildOperationalIncident(OperationalIncidentType.Kick, current));
                 return;
             }
 
             if (current.LostCirculationRisk01 > 0.72f)
             {
-                lostCirculationBias = Mathf.Clamp01(lostCirculationBias + 0.2f);
-                RaiseOperationalIncident(new OperationalIncident(
-                    OperationalIncidentType.LostCirculation,
-                    AlertSeverity.Critical,
-                    "Поглощение раствора",
-                    "Выходной расход ниже входного, эквивалентная плотность приближается к давлению гидроразрыва пласта.",
-                    "Снизить расход, контролировать объем в емкостях, подготовить материал от поглощения. Простои +18 мин.",
-                    current.MeasuredDepth));
+                RaiseOperationalIncident(BuildOperationalIncident(OperationalIncidentType.LostCirculation, current));
                 return;
             }
 
-            if (current.StuckPipeRisk01 > 0.78f)
+            List<WeightedIncidentCandidate> candidates = BuildOperationalIncidentCandidates(current);
+            float rollProbability = CalculateOperationalIncidentProbability(current, candidates);
+            if (candidates.Count == 0 || UnityEngine.Random.value > rollProbability)
             {
-                RaiseOperationalIncident(new OperationalIncident(
-                    OperationalIncidentType.DifferentialSticking,
-                    AlertSeverity.Warning,
-                    "Риск дифференциального прихвата",
-                    "Высокая перегрузка по давлению, повышенное сопротивление движению и слабая очистка в наклонном участке.",
-                    "Освободить колонну: снизить нагрузку на долото, увеличить циркуляцию, не оставлять колонну без движения. Простои +6 мин.",
-                    current.MeasuredDepth));
                 return;
             }
 
-            if (current.CuttingsTransportEfficiency01 < 0.43f)
+            OperationalIncidentType selectedType = ChooseWeightedIncident(candidates);
+            RaiseOperationalIncident(BuildOperationalIncident(selectedType, current));
+        }
+
+        private List<WeightedIncidentCandidate> BuildOperationalIncidentCandidates(DrillingState current)
+        {
+            CrewInfluence crew = GetCrewInfluenceOrDefault();
+            float depthFactor = Mathf.InverseLerp(600f, 5200f, current.MeasuredDepth);
+            float horizontalFactor = Mathf.InverseLerp(35f, 86f, current.InclinationDegrees);
+            float highFlowFactor = Mathf.InverseLerp(44f, 76f, current.FlowRateLps);
+            float pressureFactor = Mathf.InverseLerp(120f, 360f, current.StandpipePressureBar);
+            float lowAwareness = 1f - crew.SituationalAwareness01;
+            float poorMaintenance = 1f - crew.MaintenanceReadiness01;
+            bool offshore = runtimeConfig.EnvironmentType == EnvironmentType.Offshore;
+            bool arctic = runtimeConfig.GeologyRegion == GeologyRegion.ArcticShelf;
+
+            List<WeightedIncidentCandidate> candidates = new List<WeightedIncidentCandidate>(12);
+            AddIncidentCandidate(candidates, OperationalIncidentType.Kick, current.KickRisk01 * 3.2f + Mathf.InverseLerp(1.2f, 7.5f, current.GasUnitsPercent));
+            AddIncidentCandidate(candidates, OperationalIncidentType.LostCirculation, current.LostCirculationRisk01 * 3.0f + highFlowFactor * 0.45f);
+            AddIncidentCandidate(candidates, OperationalIncidentType.DifferentialSticking, current.StuckPipeRisk01 * 2.4f + horizontalFactor * 0.55f + depthFactor * 0.25f);
+            AddIncidentCandidate(candidates, OperationalIncidentType.PoorHoleCleaning, (1f - current.CuttingsTransportEfficiency01) * 2.2f + horizontalFactor * 0.65f);
+            AddIncidentCandidate(candidates, OperationalIncidentType.BitWearLimit, current.BitWear01 * 1.65f + current.Vibration.AxialEnergy * 0.5f);
+            AddIncidentCandidate(candidates, OperationalIncidentType.GasCutMud, Mathf.InverseLerp(1.6f, 8f, current.GasUnitsPercent) * 2f + current.KickRisk01 * 0.85f);
+            AddIncidentCandidate(candidates, OperationalIncidentType.MwdSignalLoss, depthFactor * 0.6f + horizontalFactor * 0.7f + current.DoglegSeverityDegPer30m * 0.08f + lowAwareness * 0.45f);
+            AddIncidentCandidate(candidates, OperationalIncidentType.TopDriveOverload, Mathf.InverseLerp(28f, 62f, current.SurfaceTorqueKnM) * 1.7f + commandRampEnergy * 0.5f + current.Vibration.LowFrequencyEnergy * 0.55f);
+            AddIncidentCandidate(candidates, OperationalIncidentType.PumpEfficiencyDrop, pressureFactor * 0.9f + highFlowFactor * 0.55f + poorMaintenance * 0.85f);
+            AddIncidentCandidate(candidates, OperationalIncidentType.ShakerOverflow, (1f - current.CuttingsTransportEfficiency01) * 0.9f + highFlowFactor * 0.55f + horizontalFactor * 0.35f);
+            AddIncidentCandidate(candidates, OperationalIncidentType.SevereWeather, (offshore ? 1.0f : 0.12f) + (arctic ? 0.65f : 0f) + crew.Fatigue * 0.25f);
+            AddIncidentCandidate(candidates, OperationalIncidentType.DrillStringWashout, pressureFactor * 0.75f + depthFactor * 0.45f + poorMaintenance * 0.55f);
+            AddIncidentCandidate(candidates, OperationalIncidentType.StickSlip, current.Vibration.LowFrequencyEnergy * 1.5f + horizontalFactor * 0.45f + Mathf.InverseLerp(130f, 190f, current.Rpm) * 0.4f);
+            AddIncidentCandidate(candidates, OperationalIncidentType.PackOff, (1f - current.CuttingsTransportEfficiency01) * 1.2f + pressureFactor * 0.5f + current.StuckPipeRisk01 * 0.65f);
+            AddIncidentCandidate(candidates, OperationalIncidentType.BitBalling, current.BitWear01 * 0.45f + (1f - current.CuttingsTransportEfficiency01) * 0.95f + current.Vibration.AxialEnergy * 0.4f);
+            AddIncidentCandidate(candidates, OperationalIncidentType.WallSloughing, current.BoreholeInstabilityRisk01 * 1.6f + (current.Lithology == LithologyType.Shale ? 0.75f : 0f));
+            return candidates;
+        }
+
+        private float CalculateOperationalIncidentProbability(DrillingState current, List<WeightedIncidentCandidate> candidates)
+        {
+            if (candidates == null || candidates.Count == 0)
             {
-                RaiseOperationalIncident(new OperationalIncident(
-                    OperationalIncidentType.PoorHoleCleaning,
-                    AlertSeverity.Warning,
-                    "Недостаточный вынос шлама",
-                    "В горизонтальном или наклонном интервале формируется шламовая постель.",
-                    "Снизить скорость проходки, увеличить расход на 100-200 л/мин и провести промывку до стабилизации давления. Простои +6 мин.",
-                    current.MeasuredDepth));
+                return 0f;
+            }
+
+            CrewInfluence crew = GetCrewInfluenceOrDefault();
+            float totalWeight = 0f;
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                totalWeight += candidates[i].Weight;
+            }
+
+            float difficulty = runtimeConfig.Difficulty == DifficultyLevel.Expert
+                ? 0.035f
+                : runtimeConfig.Difficulty == DifficultyLevel.Realistic ? 0.025f : 0.012f;
+            float physics = runtimeConfig.PhysicsPreset == PhysicsPreset.Harsh
+                ? 0.025f
+                : runtimeConfig.PhysicsPreset == PhysicsPreset.Field ? 0.014f : 0.006f;
+            float environment = runtimeConfig.EnvironmentType == EnvironmentType.Offshore ? 0.01f : 0.004f;
+            float crewRisk = crew.MistakeChancePerMinute * 0.8f + crew.Fatigue * 0.018f;
+            float trendRisk = Mathf.Max(current.KickRisk01, current.LostCirculationRisk01, current.StuckPipeRisk01) * 0.05f;
+            return Mathf.Clamp01(0.012f + difficulty + physics + environment + crewRisk + trendRisk + totalWeight * 0.006f);
+        }
+
+        private static void AddIncidentCandidate(List<WeightedIncidentCandidate> candidates, OperationalIncidentType type, float weight)
+        {
+            if (weight <= 0.18f)
+            {
                 return;
             }
 
-            if (current.BitWear01 > 0.82f)
+            candidates.Add(new WeightedIncidentCandidate(type, Mathf.Max(0.05f, weight)));
+        }
+
+        private static OperationalIncidentType ChooseWeightedIncident(List<WeightedIncidentCandidate> candidates)
+        {
+            float total = 0f;
+            for (int i = 0; i < candidates.Count; i++)
             {
-                RaiseOperationalIncident(new OperationalIncident(
-                    OperationalIncidentType.BitWearLimit,
-                    AlertSeverity.Warning,
-                    "Предельный износ долота",
-                    "Рост момента и осевой вибрации указывает на снижение режущей способности.",
-                    "Запланировать подъем и смену долота. Продолжение бурения резко снижает скорость проходки и повышает аварийность. Простои +6 мин.",
-                    current.MeasuredDepth));
+                total += candidates[i].Weight;
+            }
+
+            float roll = UnityEngine.Random.value * Mathf.Max(0.001f, total);
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                roll -= candidates[i].Weight;
+                if (roll <= 0f)
+                {
+                    return candidates[i].Type;
+                }
+            }
+
+            return candidates[candidates.Count - 1].Type;
+        }
+
+        private OperationalIncident BuildOperationalIncident(OperationalIncidentType type, DrillingState current)
+        {
+            string depthContext = BuildDepthContext(current);
+            switch (type)
+            {
+                case OperationalIncidentType.Kick:
+                    return new OperationalIncident(
+                        type,
+                        AlertSeverity.Critical,
+                        "Приток флюида",
+                        $"{depthContext} Расход на выходе выше входа, газопоказания растут, забойное давление ниже пластового.",
+                        "Немедленно стабилизировать скважину: прикрыть штуцер, поднять плотность раствора, остановить наращивание параметров. Простои +18 мин.",
+                        current.MeasuredDepth);
+
+                case OperationalIncidentType.LostCirculation:
+                    return new OperationalIncident(
+                        type,
+                        AlertSeverity.Critical,
+                        "Поглощение раствора",
+                        $"{depthContext} Выходной расход ниже входного, эквивалентная плотность приближается к давлению гидроразрыва пласта.",
+                        "Снизить расход, контролировать объем в емкостях, подготовить материал от поглощения. Простои +18 мин.",
+                        current.MeasuredDepth);
+
+                case OperationalIncidentType.DifferentialSticking:
+                    return new OperationalIncident(
+                        type,
+                        AlertSeverity.Warning,
+                        "Риск дифференциального прихвата",
+                        $"{depthContext} Высокая перегрузка по давлению, повышенное сопротивление движению и слабая очистка в наклонном участке.",
+                        "Освободить колонну: снизить нагрузку на долото, увеличить циркуляцию, не оставлять колонну без движения. Простои +6 мин.",
+                        current.MeasuredDepth);
+
+                case OperationalIncidentType.PoorHoleCleaning:
+                    return new OperationalIncident(
+                        type,
+                        AlertSeverity.Warning,
+                        "Недостаточный вынос шлама",
+                        $"{depthContext} В горизонтальном или наклонном интервале формируется шламовая постель.",
+                        "Снизить скорость проходки, увеличить расход на 100-200 л/мин и провести промывку до стабилизации давления. Простои +6 мин.",
+                        current.MeasuredDepth);
+
+                case OperationalIncidentType.BitWearLimit:
+                    return new OperationalIncident(
+                        type,
+                        AlertSeverity.Warning,
+                        "Предельный износ долота",
+                        $"{depthContext} Рост момента и осевой вибрации указывает на снижение режущей способности.",
+                        "Запланировать подъем и смену долота. Продолжение бурения снижает скорость проходки и повышает аварийность. Простои +6 мин.",
+                        current.MeasuredDepth);
+
+                case OperationalIncidentType.GasCutMud:
+                    return new OperationalIncident(
+                        type,
+                        AlertSeverity.Warning,
+                        "Газированный раствор",
+                        $"{depthContext} Газ в растворе снижает эффективную плотность, показания расхода становятся шумными.",
+                        "Включить дегазацию, проверить баланс емкостей, не снижать забойное давление до стабилизации газа. Простои +6 мин.",
+                        current.MeasuredDepth);
+
+                case OperationalIncidentType.MwdSignalLoss:
+                    return new OperationalIncident(
+                        type,
+                        AlertSeverity.Advisory,
+                        "Потеря MWD-сигнала",
+                        $"{depthContext} В наклонном/глубоком интервале ухудшилась телеметрия ННБ, траектория требует подтверждения.",
+                        "Снизить темп, запросить контрольный замер, не продолжать агрессивный набор угла без данных. Простои +6 мин.",
+                        current.MeasuredDepth);
+
+                case OperationalIncidentType.TopDriveOverload:
+                    return new OperationalIncident(
+                        type,
+                        AlertSeverity.Warning,
+                        "Перегрузка верхнего привода",
+                        $"{depthContext} Момент и вибрация выросли после изменения режима, привод работает близко к ограничению.",
+                        "Плавно снизить обороты и нагрузку, проверить проработку ствола и исключить stick-slip. Простои +6 мин.",
+                        current.MeasuredDepth);
+
+                case OperationalIncidentType.PumpEfficiencyDrop:
+                    return new OperationalIncident(
+                        type,
+                        AlertSeverity.Warning,
+                        "Просадка эффективности насоса",
+                        $"{depthContext} Давление насоса и расход расходятся: возможен износ клапанов или подсос.",
+                        "Проверить насосный блок, снизить резкие изменения расхода, подтвердить фактический выход раствора. Простои +6 мин.",
+                        current.MeasuredDepth);
+
+                case OperationalIncidentType.ShakerOverflow:
+                    return new OperationalIncident(
+                        type,
+                        AlertSeverity.Advisory,
+                        "Перегрузка вибросит",
+                        $"{depthContext} На очистке слишком много шлама, есть риск пропуска изменения выхода раствора.",
+                        "Снизить механическую скорость, стабилизировать расход, поручить бригаде контроль сит и емкостей. Простои +6 мин.",
+                        current.MeasuredDepth);
+
+                case OperationalIncidentType.SevereWeather:
+                    return new OperationalIncident(
+                        type,
+                        runtimeConfig.EnvironmentType == EnvironmentType.Offshore ? AlertSeverity.Warning : AlertSeverity.Advisory,
+                        runtimeConfig.EnvironmentType == EnvironmentType.Offshore ? "Штормовая обстановка" : "Ухудшение погоды",
+                        $"{depthContext} Внешние условия снижают готовность бригады и устойчивость операций.",
+                        "Не проводить резкие операции, подтвердить связь, снизить темп команд и подготовить безопасную паузу. Простои +6 мин.",
+                        current.MeasuredDepth);
+
+                case OperationalIncidentType.DrillStringWashout:
+                    return new OperationalIncident(
+                        type,
+                        AlertSeverity.Warning,
+                        "Подозрение на промыв колонны",
+                        $"{depthContext} Давление насоса ведет себя нехарактерно для текущего расхода и глубины.",
+                        "Стабилизировать расход, сверить давление с предыдущим режимом, подготовить проверку герметичности. Простои +6 мин.",
+                        current.MeasuredDepth);
+
+                case OperationalIncidentType.StickSlip:
+                    return new OperationalIncident(
+                        type,
+                        AlertSeverity.Warning,
+                        "Автоколебания колонны",
+                        $"{depthContext} Низкочастотная вибрация и момент растут синхронно.",
+                        "Снизить обороты на 10-15%, снять часть нагрузки и возвращать режим только после затухания вибрации. Простои +6 мин.",
+                        current.MeasuredDepth);
+
+                case OperationalIncidentType.PackOff:
+                    return new OperationalIncident(
+                        type,
+                        AlertSeverity.Warning,
+                        "Сальникообразование",
+                        $"{depthContext} Давление насоса растет на фоне слабой очистки и сопротивления движению.",
+                        "Поднять расход ступенями, снизить нагрузку, выполнить промывку и проработку интервала. Простои +6 мин.",
+                        current.MeasuredDepth);
+
+                case OperationalIncidentType.BitBalling:
+                    return new OperationalIncident(
+                        type,
+                        AlertSeverity.Warning,
+                        "Зашламование долота",
+                        $"{depthContext} Скорость проходки падает, момент и вибрация не соответствуют нагрузке.",
+                        "Снизить нагрузку, промыть забой, вернуть параметры после восстановления скорости проходки. Простои +6 мин.",
+                        current.MeasuredDepth);
+
+                default:
+                    return new OperationalIncident(
+                        OperationalIncidentType.WallSloughing,
+                        AlertSeverity.Warning,
+                        "Осыпь стенок",
+                        $"{depthContext} Нестабильная порода и колебания давления повышают риск каверн.",
+                        "Стабилизировать плотность и расход, исключить резкие команды, контролировать шлам на ситах. Простои +6 мин.",
+                        current.MeasuredDepth);
+            }
+        }
+
+        private string BuildDepthContext(DrillingState current)
+        {
+            string environment = runtimeConfig.EnvironmentType == EnvironmentType.Offshore ? "море" : "суша";
+            return $"Интервал {current.MeasuredDepth:0} м, {environment}, {ToRussianLithology(current.Lithology)}, зенит {current.InclinationDegrees:0}°.";
+        }
+
+        private static string ToRussianLithology(LithologyType lithology)
+        {
+            switch (lithology)
+            {
+                case LithologyType.Sandstone:
+                    return "песчаник";
+                case LithologyType.Limestone:
+                    return "известняк";
+                case LithologyType.Dolomite:
+                    return "доломит";
+                case LithologyType.Salt:
+                    return "соль";
+                case LithologyType.Basement:
+                    return "кристаллический фундамент";
+                default:
+                    return "глина";
             }
         }
 
@@ -918,6 +1161,98 @@ namespace SCADASim.Physics
                     return ok;
                 }
 
+                case SupervisorTaskType.GasMonitoring:
+                {
+                    bool ok = current.GasUnitsPercent < 4.5f &&
+                              current.KickRisk01 < 0.45f &&
+                              current.BottomHolePressureMPa > current.PorePressureMPa + 0.22f;
+                    summary = ok
+                        ? $"Газовый тренд стабилен: газ {current.GasUnitsPercent:0.0}%, риск притока {current.KickRisk01 * 100f:0}%, запас к пластовому {pressureMarginLow:0.0} МПа."
+                        : $"Не выполнено: газ {current.GasUnitsPercent:0.0}%, риск притока {current.KickRisk01 * 100f:0}%, запас к пластовому {pressureMarginLow:0.0} МПа.";
+                    return ok;
+                }
+
+                case SupervisorTaskType.ToolfaceControl:
+                {
+                    bool ok = current.DoglegSeverityDegPer30m < 7f &&
+                              current.DragTonnes < 34f &&
+                              vibrationG < 2.4f;
+                    summary = ok
+                        ? $"Toolface удержан: dogleg {current.DoglegSeverityDegPer30m:0.0}°/30 м, drag {current.DragTonnes:0.0} т, вибрация {vibrationG:0.0} g."
+                        : $"Не выполнено: dogleg {current.DoglegSeverityDegPer30m:0.0}°/30 м, drag {current.DragTonnes:0.0} т, вибрация {vibrationG:0.0} g.";
+                    return ok;
+                }
+
+                case SupervisorTaskType.PumpIntegrity:
+                {
+                    float sppRise = current.StandpipePressureBar - task.BaselineStandpipePressureBar;
+                    bool ok = sppRise < 10f &&
+                              Mathf.Abs(flowBalancePercent) < 6f &&
+                              current.CuttingsTransportEfficiency01 > 0.6f;
+                    summary = ok
+                        ? $"Насосы подтверждены: давление +{sppRise:0.0} бар, баланс {flowBalancePercent:+0.0;-0.0;0.0}%, очистка {current.CuttingsTransportEfficiency01 * 100f:0}%."
+                        : $"Не выполнено: давление +{sppRise:0.0} бар, баланс {flowBalancePercent:+0.0;-0.0;0.0}%, очистка {current.CuttingsTransportEfficiency01 * 100f:0}%.";
+                    return ok;
+                }
+
+                case SupervisorTaskType.EquipmentInspection:
+                {
+                    bool ok = crew.MaintenanceReadiness01 > 0.58f &&
+                              vibrationG < 2.5f &&
+                              commandRampEnergy < 0.65f;
+                    summary = ok
+                        ? $"Оборудование готово: готовность {crew.MaintenanceReadiness01 * 100f:0}%, вибрация {vibrationG:0.0} g, резкость команд низкая."
+                        : $"Не выполнено: готовность {crew.MaintenanceReadiness01 * 100f:0}%, вибрация {vibrationG:0.0} g, резкость команд {commandRampEnergy:0.0}.";
+                    return ok;
+                }
+
+                case SupervisorTaskType.WeatherResponse:
+                {
+                    bool ok = crew.ShiftCoordination01 > 0.55f &&
+                              crew.ProcedureDiscipline01 > 0.55f &&
+                              Mathf.Abs(flowBalancePercent) < 5f;
+                    summary = ok
+                        ? $"Погодный протокол выдержан: координация {crew.ShiftCoordination01 * 100f:0}%, дисциплина {crew.ProcedureDiscipline01 * 100f:0}%, баланс {flowBalancePercent:+0.0;-0.0;0.0}%."
+                        : $"Не выполнено: координация {crew.ShiftCoordination01 * 100f:0}%, дисциплина {crew.ProcedureDiscipline01 * 100f:0}%, баланс {flowBalancePercent:+0.0;-0.0;0.0}%.";
+                    return ok;
+                }
+
+                case SupervisorTaskType.MwdSurvey:
+                {
+                    bool ok = crew.SituationalAwareness01 > 0.58f &&
+                              current.DoglegSeverityDegPer30m < 8f &&
+                              current.DragTonnes < 36f;
+                    summary = ok
+                        ? $"MWD-замер подтвержден: осведомленность {crew.SituationalAwareness01 * 100f:0}%, dogleg {current.DoglegSeverityDegPer30m:0.0}°/30 м."
+                        : $"Не выполнено: осведомленность {crew.SituationalAwareness01 * 100f:0}%, dogleg {current.DoglegSeverityDegPer30m:0.0}°/30 м, drag {current.DragTonnes:0.0} т.";
+                    return ok;
+                }
+
+                case SupervisorTaskType.TorqueSmoothing:
+                {
+                    float torqueRisePercent = task.BaselineTorqueKnM > 0.1f
+                        ? (current.SurfaceTorqueKnM - task.BaselineTorqueKnM) / task.BaselineTorqueKnM * 100f
+                        : 0f;
+                    bool ok = vibrationG < 2.1f &&
+                              torqueRisePercent < 15f &&
+                              commandRampEnergy < 0.65f;
+                    summary = ok
+                        ? $"Момент сглажен: вибрация {vibrationG:0.0} g, момент {torqueRisePercent:+0;-0;0}%, резкость команд {commandRampEnergy:0.0}."
+                        : $"Не выполнено: вибрация {vibrationG:0.0} g, момент {torqueRisePercent:+0;-0;0}%, резкость команд {commandRampEnergy:0.0}.";
+                    return ok;
+                }
+
+                case SupervisorTaskType.ConnectionProcedure:
+                {
+                    bool ok = crew.ProcedureDiscipline01 > 0.58f &&
+                              crew.Fatigue < 0.65f &&
+                              Mathf.Abs(flowBalancePercent) < 6f;
+                    summary = ok
+                        ? $"Наращивание подготовлено: дисциплина {crew.ProcedureDiscipline01 * 100f:0}%, усталость {crew.Fatigue * 100f:0}%, баланс {flowBalancePercent:+0.0;-0.0;0.0}%."
+                        : $"Не выполнено: дисциплина {crew.ProcedureDiscipline01 * 100f:0}%, усталость {crew.Fatigue * 100f:0}%, баланс {flowBalancePercent:+0.0;-0.0;0.0}%.";
+                    return ok;
+                }
+
                 default:
                 {
                     bool ok = current.RopMPerHour > 10f &&
@@ -977,176 +1312,381 @@ namespace SCADASim.Physics
                     bitBallingRiskBias = Mathf.Clamp01(bitBallingRiskBias + 0.08f);
                     commandRampEnergy = Mathf.Clamp01(commandRampEnergy + 0.08f);
                     break;
+
+                case SupervisorTaskType.GasMonitoring:
+                    gasInfluxBias = Mathf.Clamp01(gasInfluxBias + 0.1f);
+                    break;
+
+                case SupervisorTaskType.ToolfaceControl:
+                case SupervisorTaskType.MwdSurvey:
+                    bitBallingRiskBias = Mathf.Clamp01(bitBallingRiskBias + 0.07f);
+                    commandRampEnergy = Mathf.Clamp01(commandRampEnergy + 0.08f);
+                    break;
+
+                case SupervisorTaskType.PumpIntegrity:
+                    lostCirculationBias = Mathf.Clamp01(lostCirculationBias + 0.06f);
+                    bitBallingRiskBias = Mathf.Clamp01(bitBallingRiskBias + 0.04f);
+                    break;
+
+                case SupervisorTaskType.EquipmentInspection:
+                case SupervisorTaskType.ConnectionProcedure:
+                    crewManager?.ApplyFatiguePenalty(0.05f, 0.04f);
+                    commandRampEnergy = Mathf.Clamp01(commandRampEnergy + 0.08f);
+                    break;
+
+                case SupervisorTaskType.WeatherResponse:
+                    crewManager?.ApplyFatiguePenalty(0.06f, 0.05f);
+                    state.NonProductiveTimeMinutes += 3f;
+                    break;
+
+                case SupervisorTaskType.TorqueSmoothing:
+                    commandRampEnergy = Mathf.Clamp01(commandRampEnergy + 0.14f);
+                    state.BitWear01 = Mathf.Clamp01(state.BitWear01 + 0.025f);
+                    break;
             }
         }
 
         private SupervisorTask BuildSupervisorTask(DrillingState current, int sequence)
         {
-            int variant = sequence % 10;
+            List<WeightedTaskCandidate> candidates = BuildSupervisorTaskCandidates(current);
+            SupervisorTaskType selectedType = ChooseWeightedTask(candidates);
+            hasLastSupervisorTaskType = true;
+            lastSupervisorTaskType = selectedType;
+            return CreateSupervisorTask(selectedType, current);
+        }
+
+        private List<WeightedTaskCandidate> BuildSupervisorTaskCandidates(DrillingState current)
+        {
             CrewInfluence crew = GetCrewInfluenceOrDefault();
             float pressureMarginLow = current.BottomHolePressureMPa - current.PorePressureMPa;
             float pressureMarginHigh = current.FracturePressureMPa - current.BottomHolePressureMPa;
-            if (current.KickRisk01 > 0.42f || variant == 5)
+            float depthFactor = Mathf.InverseLerp(600f, 5200f, current.MeasuredDepth);
+            float horizontalFactor = Mathf.InverseLerp(35f, 86f, current.InclinationDegrees);
+            float lowAwareness = 1f - crew.SituationalAwareness01;
+            float lowDiscipline = 1f - crew.ProcedureDiscipline01;
+            float poorMaintenance = 1f - crew.MaintenanceReadiness01;
+            float highFlow = Mathf.InverseLerp(44f, 76f, current.FlowRateLps);
+            float highPressure = Mathf.InverseLerp(130f, 360f, current.StandpipePressureBar);
+            bool offshore = runtimeConfig.EnvironmentType == EnvironmentType.Offshore;
+            bool arctic = runtimeConfig.GeologyRegion == GeologyRegion.ArcticShelf;
+
+            List<WeightedTaskCandidate> candidates = new List<WeightedTaskCandidate>(18);
+            AddTaskCandidate(candidates, SupervisorTaskType.KickControl, 0.35f + current.KickRisk01 * 3.6f + Mathf.InverseLerp(1.2f, 7f, current.GasUnitsPercent));
+            AddTaskCandidate(candidates, SupervisorTaskType.LossControl, 0.3f + current.LostCirculationRisk01 * 3.1f + highFlow * 0.45f);
+            AddTaskCandidate(candidates, SupervisorTaskType.DirectionalDrag, 0.45f + horizontalFactor * 1.7f + current.StuckPipeRisk01 * 1.2f + depthFactor * 0.35f);
+            AddTaskCandidate(candidates, SupervisorTaskType.HoleCleaning, 0.55f + (1f - current.CuttingsTransportEfficiency01) * 2.1f + horizontalFactor * 0.85f);
+            AddTaskCandidate(candidates, SupervisorTaskType.ShaleStability, 0.35f + current.BoreholeInstabilityRisk01 * 1.8f + (current.Lithology == LithologyType.Shale ? 1.1f : 0f));
+            AddTaskCandidate(candidates, SupervisorTaskType.BitAssessment, 0.45f + current.BitWear01 * 1.8f + current.Vibration.AxialEnergy * 0.65f);
+            AddTaskCandidate(candidates, SupervisorTaskType.PressureWindow, 0.5f + Mathf.InverseLerp(0.9f, 0.1f, pressureMarginLow) + Mathf.InverseLerp(1.2f, 0.25f, pressureMarginHigh));
+            AddTaskCandidate(candidates, SupervisorTaskType.CrewHandover, 0.28f + crew.Fatigue * 1.4f + lowDiscipline * 0.75f);
+            AddTaskCandidate(candidates, SupervisorTaskType.PumpEfficiency, 0.35f + highPressure * 0.85f + highFlow * 0.65f + (1f - current.CuttingsTransportEfficiency01) * 0.45f);
+            AddTaskCandidate(candidates, SupervisorTaskType.GasMonitoring, 0.32f + Mathf.InverseLerp(0.8f, 6.5f, current.GasUnitsPercent) * 1.6f + current.KickRisk01 * 0.95f);
+            AddTaskCandidate(candidates, SupervisorTaskType.ToolfaceControl, 0.28f + horizontalFactor * 1.1f + Mathf.InverseLerp(2f, 9f, current.DoglegSeverityDegPer30m) + lowAwareness * 0.55f);
+            AddTaskCandidate(candidates, SupervisorTaskType.PumpIntegrity, 0.24f + highPressure * 0.9f + poorMaintenance * 0.9f + depthFactor * 0.25f);
+            AddTaskCandidate(candidates, SupervisorTaskType.EquipmentInspection, 0.25f + poorMaintenance * 1.25f + commandRampEnergy * 0.3f + crew.Fatigue * 0.35f);
+            AddTaskCandidate(candidates, SupervisorTaskType.WeatherResponse, 0.15f + (offshore ? 1.35f : 0.12f) + (arctic ? 0.55f : 0f) + crew.Fatigue * 0.25f);
+            AddTaskCandidate(candidates, SupervisorTaskType.MwdSurvey, 0.24f + horizontalFactor * 0.85f + depthFactor * 0.45f + lowAwareness * 0.65f);
+            AddTaskCandidate(candidates, SupervisorTaskType.TorqueSmoothing, 0.3f + current.Vibration.LowFrequencyEnergy * 1.3f + Mathf.InverseLerp(28f, 58f, current.SurfaceTorqueKnM) + commandRampEnergy * 0.35f);
+            AddTaskCandidate(candidates, SupervisorTaskType.ConnectionProcedure, 0.25f + crew.Fatigue * 0.7f + lowDiscipline * 0.85f + Mathf.Repeat(supervisorTaskSequence, 4f) * 0.08f);
+            AddTaskCandidate(candidates, SupervisorTaskType.ShiftPlan, 0.55f + UnityEngine.Random.value * 0.25f);
+            return candidates;
+        }
+
+        private void AddTaskCandidate(List<WeightedTaskCandidate> candidates, SupervisorTaskType type, float weight)
+        {
+            if (hasLastSupervisorTaskType && lastSupervisorTaskType == type)
             {
-                return new SupervisorTask(
-                    SupervisorTaskType.KickControl,
-                    "Контроль притока",
-                    "Признаки притока: выход и газ растут. Нужно вернуть скважину к безопасному превышению забойного давления над пластовым без выхода к гидроразрыву.",
-                    "Успех: выход не выше входа более чем на 3%, газ <6%, забойное давление выше пластового и ниже гидроразрыва.",
-                    "Смотреть: расход вход/выход, газ, забойное и пластовое давление, эквивалентную плотность.",
-                    "Крутилки: прикрыть штуцер, поднять плотность раствора на 0.02-0.05 SG, не разгонять обороты и нагрузку.",
-                    8f,
-                    55f,
-                    140,
-                    90,
-                    current);
+                weight *= 0.35f;
             }
 
-            if (current.LostCirculationRisk01 > 0.38f || variant == 6)
+            candidates.Add(new WeightedTaskCandidate(type, Mathf.Max(0.05f, weight)));
+        }
+
+        private static SupervisorTaskType ChooseWeightedTask(List<WeightedTaskCandidate> candidates)
+        {
+            float total = 0f;
+            for (int i = 0; i < candidates.Count; i++)
             {
-                return new SupervisorTask(
-                    SupervisorTaskType.LossControl,
-                    "Контроль поглощения",
-                    "Емкости проседают: слабый пласт принимает раствор. Нужно снизить динамическую нагрузку на пласт.",
-                    "Успех: выход не ниже входа более чем на 5%, давление насоса не выросло больше чем на 12 бар, риск поглощения <42%.",
-                    "Смотреть: расход на выходе, давление насоса, эквивалентную плотность, риск поглощения.",
-                    "Крутилки: снизить расход на 100-250 л/мин, открыть штуцер, не поднимать плотность.",
-                    9f,
-                    55f,
-                    130,
-                    85,
-                    current);
+                total += candidates[i].Weight;
             }
 
-            if (current.InclinationDegrees > 55f || variant == 1)
+            float roll = UnityEngine.Random.value * Mathf.Max(0.001f, total);
+            for (int i = 0; i < candidates.Count; i++)
             {
-                return new SupervisorTask(
-                    SupervisorTaskType.DirectionalDrag,
-                    "Задание бурового мастера",
-                    "В направленном участке растут момент и сопротивление движению колонны. Нужно удержать механику без перехода к прихвату.",
-                    "Успех: сопротивление движению <35 т, вынос шлама >65%, риск прихвата <58%.",
-                    "Смотреть: момент, нагрузку, зенитный угол, вынос шлама, риск прихвата.",
-                    "Крутилки: не завышать нагрузку на долото, держать расход достаточным, при вибрации снижать обороты.",
-                    10f,
-                    60f,
-                    160,
-                    95,
-                    current);
+                roll -= candidates[i].Weight;
+                if (roll <= 0f)
+                {
+                    return candidates[i].Type;
+                }
             }
 
-            if (current.CuttingsTransportEfficiency01 < 0.58f || variant == 2)
-            {
-                return new SupervisorTask(
-                    SupervisorTaskType.HoleCleaning,
-                    "Промывка ствола",
-                    "Шламовая постель мешает бурению. Нужно поднять очистку, не спровоцировав рост давления.",
-                    "Успех: вынос шлама >70%, давление насоса +12 бар максимум, вибрация <2.2 g.",
-                    "Смотреть: вынос шлама, давление насоса, вибрацию, расход на выходе.",
-                    "Крутилки: плавно поднять расход, снизить нагрузку и скорость проходки, выполнить промывку ствола бригадой.",
-                    7f,
-                    45f,
-                    120,
-                    70,
-                    current);
-            }
+            return SupervisorTaskType.ShiftPlan;
+        }
 
-            if (current.Lithology == LithologyType.Shale || variant == 3)
+        private SupervisorTask CreateSupervisorTask(SupervisorTaskType type, DrillingState current)
+        {
+            switch (type)
             {
-                return new SupervisorTask(
-                    SupervisorTaskType.ShaleStability,
-                    "Запрос геолога",
-                    "Глинистый интервал чувствителен к давлению и расходу. Нужно пройти без осыпи стенок.",
-                    "Успех: эквивалентная плотность в безопасном окне, риск осыпи <55%, баланс расхода в пределах 5%.",
-                    "Смотреть: эквивалентную плотность, забойное/пластовое давление, гидроразрыв, риск осыпи, расход вход/выход.",
-                    "Крутилки: держать плотность и штуцер без резких скачков, расход менять малыми шагами.",
-                    9f,
-                    60f,
-                    150,
-                    90,
-                    current);
-            }
+                case SupervisorTaskType.KickControl:
+                    return new SupervisorTask(
+                        type,
+                        "Контроль притока",
+                        "Признаки притока: выход и газ растут. Нужно вернуть скважину к безопасному превышению забойного давления над пластовым без выхода к гидроразрыву.",
+                        "Успех: выход не выше входа более чем на 3%, газ <6%, забойное давление выше пластового и ниже гидроразрыва.",
+                        "Смотреть: расход вход/выход, газ, забойное и пластовое давление, эквивалентную плотность.",
+                        "Крутилки: прикрыть штуцер, поднять плотность раствора на 0.02-0.05 SG, не разгонять обороты и нагрузку.",
+                        8f,
+                        55f,
+                        140,
+                        90,
+                        current);
 
-            if (current.BitWear01 > 0.55f || variant == 4)
-            {
-                return new SupervisorTask(
-                    SupervisorTaskType.BitAssessment,
-                    "Оценка долота",
-                    "Долото теряет эффективность. Нужно сохранить скорость проходки без разрушительной вибрации.",
-                    "Успех: вибрация <2.2 g, момент не вырос выше +20%, скорость проходки >=8 м/ч.",
-                    "Смотреть: вибрацию, момент, скорость проходки, износ долота.",
-                    "Крутилки: снизить нагрузку и обороты до устойчивого режима, не давить долото насильно.",
-                    8f,
-                    50f,
-                    125,
-                    75,
-                    current);
-            }
+                case SupervisorTaskType.LossControl:
+                    return new SupervisorTask(
+                        type,
+                        "Контроль поглощения",
+                        "Емкости проседают: слабый пласт принимает раствор. Нужно снизить динамическую нагрузку на пласт.",
+                        "Успех: выход не ниже входа более чем на 5%, давление насоса не выросло больше чем на 12 бар, риск поглощения <42%.",
+                        "Смотреть: расход на выходе, давление насоса, эквивалентную плотность, риск поглощения.",
+                        "Крутилки: снизить расход на 100-250 л/мин, открыть штуцер, не поднимать плотность.",
+                        9f,
+                        55f,
+                        130,
+                        85,
+                        current);
 
-            if (pressureMarginLow < 0.45f || pressureMarginHigh < 0.75f || variant == 7)
-            {
-                return new SupervisorTask(
-                    SupervisorTaskType.PressureWindow,
-                    "Распоряжение супервайзера",
-                    "Проверить окно давлений: нужен запас над пластовым давлением и запас до гидроразрыва.",
-                    "Успех: запас над пластовым >0.25 МПа, запас до гидроразрыва >0.45 МПа, баланс расхода в пределах 4%.",
-                    "Смотреть: забойное, пластовое и давление гидроразрыва, расход вход/выход.",
-                    "Крутилки: корректировать плотность раствора и штуцер малыми шагами, расход менять плавно.",
-                    7f,
-                    45f,
-                    140,
-                    80,
-                    current);
-            }
+                case SupervisorTaskType.DirectionalDrag:
+                    return new SupervisorTask(
+                        type,
+                        "Задание бурового мастера",
+                        "В направленном участке растут момент и сопротивление движению колонны. Нужно удержать механику без перехода к прихвату.",
+                        "Успех: сопротивление движению <35 т, вынос шлама >65%, риск прихвата <58%.",
+                        "Смотреть: момент, нагрузку, зенитный угол, вынос шлама, риск прихвата.",
+                        "Крутилки: не завышать нагрузку на долото, держать расход достаточным, при вибрации снижать обороты.",
+                        10f,
+                        60f,
+                        160,
+                        95,
+                        current);
 
-            if (crew.Fatigue > 0.5f || variant == 8)
-            {
-                return new SupervisorTask(
-                    SupervisorTaskType.CrewHandover,
-                    "Подготовка пересменки",
-                    "Начальник смены требует снизить операционный риск перед передачей вахты.",
-                    "Успех: усталость <58%, дисциплина процедур >55%, координация >55%.",
-                    "Смотреть: усталость, дисциплину, координацию и журнал действий бригады.",
-                    "Действия: провести инструктаж, осмотр оборудования и не перегружать бригаду лишними командами.",
-                    6f,
-                    40f,
-                    110,
-                    65,
-                    current);
-            }
+                case SupervisorTaskType.HoleCleaning:
+                    return new SupervisorTask(
+                        type,
+                        "Промывка ствола",
+                        "Шламовая постель мешает бурению. Нужно поднять очистку, не спровоцировав рост давления.",
+                        "Успех: вынос шлама >70%, давление насоса +12 бар максимум, вибрация <2.2 g.",
+                        "Смотреть: вынос шлама, давление насоса, вибрацию, расход на выходе.",
+                        "Крутилки: плавно поднять расход, снизить нагрузку и скорость проходки, выполнить промывку ствола бригадой.",
+                        7f,
+                        45f,
+                        120,
+                        70,
+                        current);
 
-            if (variant == 9)
-            {
-                return new SupervisorTask(
-                    SupervisorTaskType.PumpEfficiency,
-                    "Проверка насосного режима",
-                    "Начальство просит подтвердить, что расход работает на очистку, а не просто разгоняет давление.",
-                    "Успех: вынос шлама >64%, давление насоса +18 бар максимум, баланс расхода в пределах 6%.",
-                    "Смотреть: давление насоса, расход вход/выход, вынос шлама, вибрацию.",
-                    "Крутилки: найти умеренный расход, не компенсировать плохую очистку резким ростом оборотов.",
-                    7f,
-                    50f,
-                    125,
-                    70,
-                    current);
-            }
+                case SupervisorTaskType.ShaleStability:
+                    return new SupervisorTask(
+                        type,
+                        "Запрос геолога",
+                        "Глинистый интервал чувствителен к давлению и расходу. Нужно пройти без осыпи стенок.",
+                        "Успех: эквивалентная плотность в безопасном окне, риск осыпи <55%, баланс расхода в пределах 5%.",
+                        "Смотреть: эквивалентную плотность, забойное/пластовое давление, гидроразрыв, риск осыпи, расход вход/выход.",
+                        "Крутилки: держать плотность и штуцер без резких скачков, расход менять малыми шагами.",
+                        9f,
+                        60f,
+                        150,
+                        90,
+                        current);
 
-            return new SupervisorTask(
-                SupervisorTaskType.ShiftPlan,
-                "План смены",
-                "Рабочий режим без осложнений: держать скорость проходки, давление и механику в коридоре.",
-                "Успех: скорость проходки >10 м/ч, вибрация <2.2 g, износ <75%, окно давлений безопасное.",
-                "Смотреть: скорость проходки, вибрацию, износ, забойное/пластовое давление и гидроразрыв.",
-                "Крутилки: оптимизировать обороты и нагрузку, расход держать под очистку, эквив. плотность не выводить за окно.",
-                8f,
-                55f,
-                120,
-                70,
-                current);
+                case SupervisorTaskType.BitAssessment:
+                    return new SupervisorTask(
+                        type,
+                        "Оценка долота",
+                        "Долото теряет эффективность. Нужно сохранить скорость проходки без разрушительной вибрации.",
+                        "Успех: вибрация <2.2 g, момент не вырос выше +20%, скорость проходки >=8 м/ч.",
+                        "Смотреть: вибрацию, момент, скорость проходки, износ долота.",
+                        "Крутилки: снизить нагрузку и обороты до устойчивого режима, не давить долото насильно.",
+                        8f,
+                        50f,
+                        125,
+                        75,
+                        current);
+
+                case SupervisorTaskType.PressureWindow:
+                    return new SupervisorTask(
+                        type,
+                        "Распоряжение супервайзера",
+                        "Проверить окно давлений: нужен запас над пластовым давлением и запас до гидроразрыва.",
+                        "Успех: запас над пластовым >0.25 МПа, запас до гидроразрыва >0.45 МПа, баланс расхода в пределах 4%.",
+                        "Смотреть: забойное, пластовое и давление гидроразрыва, расход вход/выход.",
+                        "Крутилки: корректировать плотность раствора и штуцер малыми шагами, расход менять плавно.",
+                        7f,
+                        45f,
+                        140,
+                        80,
+                        current);
+
+                case SupervisorTaskType.CrewHandover:
+                    return new SupervisorTask(
+                        type,
+                        "Подготовка пересменки",
+                        "Начальник смены требует снизить операционный риск перед передачей вахты.",
+                        "Успех: усталость <58%, дисциплина процедур >55%, координация >55%.",
+                        "Смотреть: усталость, дисциплину, координацию и журнал действий бригады.",
+                        "Действия: провести инструктаж, осмотр оборудования и не перегружать бригаду лишними командами.",
+                        6f,
+                        40f,
+                        110,
+                        65,
+                        current);
+
+                case SupervisorTaskType.PumpEfficiency:
+                    return new SupervisorTask(
+                        type,
+                        "Проверка насосного режима",
+                        "Начальство просит подтвердить, что расход работает на очистку, а не просто разгоняет давление.",
+                        "Успех: вынос шлама >64%, давление насоса +18 бар максимум, баланс расхода в пределах 6%.",
+                        "Смотреть: давление насоса, расход вход/выход, вынос шлама, вибрацию.",
+                        "Крутилки: найти умеренный расход, не компенсировать плохую очистку резким ростом оборотов.",
+                        7f,
+                        50f,
+                        125,
+                        70,
+                        current);
+
+                case SupervisorTaskType.GasMonitoring:
+                    return new SupervisorTask(
+                        type,
+                        "Газовый контроль",
+                        "Газоанализатор показывает нестабильный тренд. Нужно подтвердить, что это не ранний приток.",
+                        "Успех: газ <4.5%, риск притока <45%, забойное давление выше пластового с запасом.",
+                        "Смотреть: газ, расход вход/выход, плотность раствора, забойное и пластовое давление.",
+                        "Действия: поручить бригаде контроль дегазатора, держать штуцер и плотность без резких изменений.",
+                        7f,
+                        45f,
+                        125,
+                        80,
+                        current);
+
+                case SupervisorTaskType.ToolfaceControl:
+                    return new SupervisorTask(
+                        type,
+                        "Контроль toolface",
+                        "ННБ сообщает, что направленный инструмент начинает уходить с планового положения.",
+                        "Успех: резкость набора угла <7°/30 м, сопротивление <34 т, вибрация <2.4 g.",
+                        "Смотреть: зенит, азимут, dogleg, момент и вибрацию.",
+                        "Крутилки: снизить грубую нагрузку, не форсировать обороты, запросить замер ННБ.",
+                        8f,
+                        50f,
+                        135,
+                        80,
+                        current);
+
+                case SupervisorTaskType.PumpIntegrity:
+                    return new SupervisorTask(
+                        type,
+                        "Проверка насосов",
+                        "Насосный режим выглядит нестабильно: надо отличить плохую очистку от проблемы насоса.",
+                        "Успех: давление насоса не выросло больше +10 бар, баланс расхода в пределах 6%, вынос шлама >60%.",
+                        "Смотреть: давление насоса, расход вход/выход, вынос шлама, готовность оборудования.",
+                        "Действия: снизить резкие ступени расхода, поручить механику проверку насосного блока.",
+                        7f,
+                        45f,
+                        120,
+                        75,
+                        current);
+
+                case SupervisorTaskType.EquipmentInspection:
+                    return new SupervisorTask(
+                        type,
+                        "Осмотр оборудования",
+                        "Перед сложным интервалом нужна проверка верхнего привода, насосов и линии манифольда.",
+                        "Успех: готовность оборудования >58%, вибрация <2.5 g, команды идут без резких скачков.",
+                        "Смотреть: готовность оборудования бригады, момент, вибрацию и скорость изменения уставок.",
+                        "Действия: выполнить осмотр вышки и не менять параметры крупными ступенями.",
+                        6f,
+                        40f,
+                        110,
+                        70,
+                        current);
+
+                case SupervisorTaskType.WeatherResponse:
+                    return new SupervisorTask(
+                        type,
+                        runtimeConfig.EnvironmentType == EnvironmentType.Offshore ? "Штормовой протокол" : "Погодный протокол",
+                        runtimeConfig.EnvironmentType == EnvironmentType.Offshore
+                            ? "Метеоусловия ухудшились на платформе. Нужно снизить операционный риск и подтвердить связь."
+                            : "Погода мешает снабжению и связи. Нужно пройти интервал без авральных команд.",
+                        "Успех: координация >55%, дисциплина процедур >55%, баланс расхода в пределах 5%.",
+                        "Смотреть: координацию, дисциплину, расход вход/выход, журнал бригады.",
+                        "Действия: провести короткий инструктаж, снизить темп команд, подтвердить контроль емкостей.",
+                        6f,
+                        40f,
+                        115,
+                        70,
+                        current);
+
+                case SupervisorTaskType.MwdSurvey:
+                    return new SupervisorTask(
+                        type,
+                        "Контрольный MWD-замер",
+                        "Траектория и датчики требуют подтверждения, иначе можно уйти от планового ствола.",
+                        "Успех: осведомленность бригады >58%, dogleg <8°/30 м, сопротивление <36 т.",
+                        "Смотреть: зенит, азимут, dogleg, сопротивление движению, осведомленность ННБ.",
+                        "Действия: выполнить замер инклинометрии, держать мягкие параметры до подтверждения.",
+                        7f,
+                        45f,
+                        120,
+                        75,
+                        current);
+
+                case SupervisorTaskType.TorqueSmoothing:
+                    return new SupervisorTask(
+                        type,
+                        "Сглаживание момента",
+                        "Момент реагирует рывками, возможен stick-slip или перегруз верхнего привода.",
+                        "Успех: вибрация <2.1 g, момент не выше +15% к базовому, команды без резких скачков.",
+                        "Смотреть: момент, вибрацию, обороты, нагрузку и энергию резких команд.",
+                        "Крутилки: снизить обороты и нагрузку малыми шагами, затем возвращать режим постепенно.",
+                        7f,
+                        45f,
+                        130,
+                        80,
+                        current);
+
+                case SupervisorTaskType.ConnectionProcedure:
+                    return new SupervisorTask(
+                        type,
+                        "Процедура наращивания",
+                        "Перед наращиванием нужно не потерять циркуляционный контроль и не уронить дисциплину смены.",
+                        "Успех: дисциплина процедур >58%, усталость <65%, баланс расхода в пределах 6%.",
+                        "Смотреть: дисциплину, усталость, расход вход/выход, давление насоса.",
+                        "Действия: провести чек-лист бригады, стабилизировать расход, не ускорять время на критическом шаге.",
+                        6f,
+                        40f,
+                        105,
+                        65,
+                        current);
+
+                default:
+                    return new SupervisorTask(
+                        SupervisorTaskType.ShiftPlan,
+                        "План смены",
+                        "Рабочий режим без осложнений: держать скорость проходки, давление и механику в коридоре.",
+                        "Успех: скорость проходки >10 м/ч, вибрация <2.2 g, износ <75%, окно давлений безопасное.",
+                        "Смотреть: скорость проходки, вибрацию, износ, забойное/пластовое давление и гидроразрыв.",
+                        "Крутилки: оптимизировать обороты и нагрузку, расход держать под очистку, эквив. плотность не выводить за окно.",
+                        8f,
+                        55f,
+                        120,
+                        70,
+                        current);
+            }
         }
 
         private void RaiseOperationalIncident(OperationalIncident incident)
         {
             lastIncidentTime = Time.time;
+            ApplyOperationalIncidentBias(incident.Type);
             state.NonProductiveTimeMinutes += incident.Severity == AlertSeverity.Critical ? 18f : 6f;
 
             eventChannel?.Raise(
@@ -1154,6 +1694,48 @@ namespace SCADASim.Physics
                 incident.Severity,
                 $"{incident.Title}: {incident.Message}",
                 incident);
+        }
+
+        private void ApplyOperationalIncidentBias(OperationalIncidentType type)
+        {
+            switch (type)
+            {
+                case OperationalIncidentType.Kick:
+                case OperationalIncidentType.GasCutMud:
+                    gasInfluxBias = Mathf.Clamp01(gasInfluxBias + 0.16f);
+                    break;
+
+                case OperationalIncidentType.LostCirculation:
+                    lostCirculationBias = Mathf.Clamp01(lostCirculationBias + 0.18f);
+                    break;
+
+                case OperationalIncidentType.DifferentialSticking:
+                case OperationalIncidentType.PackOff:
+                    bitBallingRiskBias = Mathf.Clamp01(bitBallingRiskBias + 0.12f);
+                    commandRampEnergy = Mathf.Clamp(commandRampEnergy + 0.08f, 0f, 4f);
+                    break;
+
+                case OperationalIncidentType.PoorHoleCleaning:
+                case OperationalIncidentType.ShakerOverflow:
+                case OperationalIncidentType.BitBalling:
+                    bitBallingRiskBias = Mathf.Clamp01(bitBallingRiskBias + 0.1f);
+                    break;
+
+                case OperationalIncidentType.WallSloughing:
+                    wallSloughingRiskBias = Mathf.Clamp01(wallSloughingRiskBias + 0.14f);
+                    break;
+
+                case OperationalIncidentType.TopDriveOverload:
+                case OperationalIncidentType.StickSlip:
+                    commandRampEnergy = Mathf.Clamp(commandRampEnergy + 0.18f, 0f, 4f);
+                    break;
+
+                case OperationalIncidentType.PumpEfficiencyDrop:
+                case OperationalIncidentType.DrillStringWashout:
+                    lostCirculationBias = Mathf.Clamp01(lostCirculationBias + 0.05f);
+                    bitBallingRiskBias = Mathf.Clamp01(bitBallingRiskBias + 0.05f);
+                    break;
+            }
         }
 
         private CrewInfluence GetCrewInfluenceOrDefault()
@@ -1176,6 +1758,30 @@ namespace SCADASim.Physics
                 MaintenanceReadiness01 = 0.7f,
                 ShiftCoordination01 = 0.7f
             };
+        }
+
+        private readonly struct WeightedIncidentCandidate
+        {
+            public readonly OperationalIncidentType Type;
+            public readonly float Weight;
+
+            public WeightedIncidentCandidate(OperationalIncidentType type, float weight)
+            {
+                Type = type;
+                Weight = weight;
+            }
+        }
+
+        private readonly struct WeightedTaskCandidate
+        {
+            public readonly SupervisorTaskType Type;
+            public readonly float Weight;
+
+            public WeightedTaskCandidate(SupervisorTaskType type, float weight)
+            {
+                Type = type;
+                Weight = weight;
+            }
         }
 
         private void HandleCrewIncident(CrewIncident incident)
@@ -1201,6 +1807,25 @@ namespace SCADASim.Physics
             {
                 lostCirculationBias = Mathf.Clamp01(lostCirculationBias + 0.12f);
                 bitBallingRiskBias = Mathf.Clamp01(bitBallingRiskBias + 0.08f);
+            }
+            else if (incident.Type == CrewIncidentType.ToolfaceDrift)
+            {
+                commandRampEnergy = Mathf.Clamp(commandRampEnergy + 0.16f, 0f, 4f);
+                bitBallingRiskBias = Mathf.Clamp01(bitBallingRiskBias + 0.05f);
+            }
+            else if (incident.Type == CrewIncidentType.PumpLag)
+            {
+                lostCirculationBias = Mathf.Clamp01(lostCirculationBias + 0.06f);
+                bitBallingRiskBias = Mathf.Clamp01(bitBallingRiskBias + 0.05f);
+            }
+            else if (incident.Type == CrewIncidentType.MissedGasTrend)
+            {
+                gasInfluxBias = Mathf.Clamp01(gasInfluxBias + 0.12f);
+            }
+            else if (incident.Type == CrewIncidentType.RadioMiscommunication)
+            {
+                commandRampEnergy = Mathf.Clamp(commandRampEnergy + 0.12f, 0f, 4f);
+                crewManager?.ApplyFatiguePenalty(0.03f, 0.03f);
             }
         }
     }

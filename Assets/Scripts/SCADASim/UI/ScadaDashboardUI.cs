@@ -7,36 +7,36 @@ using SCADASim.Environment;
 using SCADASim.Physics;
 using SCADASim.Trajectory;
 using System.Collections;
-using System.IO;
 using UnityEngine;
 using UnityEngine.UIElements;
-using UnityEngine.Video;
 
 namespace SCADASim.UI
 {
     public sealed class ScadaDashboardUI : MonoBehaviour
     {
         private const float WellboreVisualScale = 0.035f;
-        private const float WellboreVisualRadiusMeters = 4.0f;
-        private const int TutorialStepCount = 8;
+        private const float WellboreVisualRadiusMeters = 8.0f;
+        private const int TutorialStepCount = 12;
+        private const float DesignWidth = 1600f;
+        private const float DesignHeight = 900f;
 
         private static readonly Color GraphRed = new Color(0.88f, 0.02f, 0.08f);
         private static readonly Color GraphGreen = new Color(0.13f, 0.55f, 0.32f);
         private static readonly Color GraphBlue = new Color(0.26f, 0.52f, 1f);
         private static readonly Color GraphBlack = new Color(0.05f, 0.05f, 0.05f);
-        private static readonly GraphAxisScale TorqueScale = new GraphAxisScale("Момент, кНм", 0f, 65f);
-        private static readonly GraphAxisScale VibrationScale = new GraphAxisScale("Вибрация, %", 0f, 100f);
-        private static readonly GraphAxisScale StandpipePressureScale = new GraphAxisScale("Давление насоса, бар", 0f, 360f);
-        private static readonly GraphAxisScale FlowBalanceScale = new GraphAxisScale("Баланс расхода, л/мин", -600f, 600f);
-        private static readonly GraphAxisScale RopScale = new GraphAxisScale("Скорость проходки, м/ч", 0f, 45f);
-        private static readonly GraphAxisScale RiskPercentScale = new GraphAxisScale("Риск или износ, %", 0f, 100f);
+        private static readonly GraphAxisScale TorqueScale = new GraphAxisScale("Момент, кНм", 0f, 65f, 8f, 42f);
+        private static readonly GraphAxisScale VibrationScale = new GraphAxisScale("Вибрация, %", 0f, 100f, 0f, 55f);
+        private static readonly GraphAxisScale StandpipePressureScale = new GraphAxisScale("Давление насоса, бар", 0f, 360f, 70f, 260f);
+        private static readonly GraphAxisScale FlowBalanceScale = new GraphAxisScale("Баланс расхода, л/мин", -600f, 600f, -150f, 150f);
+        private static readonly GraphAxisScale RopScale = new GraphAxisScale("Скорость проходки, м/ч", 0f, 45f, 6f, 32f);
+        private static readonly GraphAxisScale RiskPercentScale = new GraphAxisScale("Риск или износ, %", 0f, 100f, 0f, 45f);
         private static readonly GraphAxisScale BottomHolePressureScale = new GraphAxisScale("Забойное давление, МПа", 0f, 80f);
         private static readonly GraphAxisScale PorePressureScale = new GraphAxisScale("Пластовое давление, МПа", 0f, 80f);
 
         private readonly List<string> locationChoices = new List<string>
         {
-            "СУША - НАЗЕМНАЯ БУРОВАЯ",
-            "МОРЕ - МОРСКАЯ ПЛАТФОРМА"
+            "Суша",
+            "Море"
         };
 
         private readonly List<string> profileChoices = new List<string>
@@ -49,12 +49,12 @@ namespace SCADASim.UI
 
         private readonly List<string> depthChoices = new List<string>
         {
-            "0 м - забуривание, кондуктор 324 мм",
-            "500 м - под башмаком кондуктора",
-            "1500 м - промежуточная колонна 245 мм",
-            "2500 м - набор угла и продуктивный интервал",
-            "3500 м - глубокий наклонный ствол",
-            "4500 м - длинный горизонтальный участок"
+            "0 м",
+            "500 м",
+            "1500 м",
+            "2500 м",
+            "3500 м",
+            "4500 м"
         };
 
         private readonly List<string> regionChoices = new List<string>
@@ -68,59 +68,70 @@ namespace SCADASim.UI
         private readonly List<string> difficultyChoices = new List<string>
         {
             "ТРЕНИРОВКА",
-            "ЛЕГКИЙ РЕЖИМ",
-            "ПРОМЫСЛОВЫЙ РЕЖИМ",
-            "ЭКСПЕРТНЫЙ РЕЖИМ"
+            "ЛЕГКИЙ",
+            "ПРОМЫСЛОВЫЙ",
+            "ЭКСПЕРТНЫЙ"
         };
 
         private readonly List<string> physicsChoices = new List<string>
         {
-            "СТАБИЛЬНАЯ ФИЗИКА",
-            "ПОЛЕВАЯ ФИЗИКА",
-            "ЖЕСТКИЕ ОСЛОЖНЕНИЯ"
+            "СТАБИЛЬНАЯ",
+            "ПОЛЕВАЯ",
+            "ОСЛОЖНЕНИЯ"
         };
 
         private readonly List<string> crewChoices = new List<string>
         {
-            "7 ЧЕЛОВЕК (ПОЛНАЯ)",
-            "4 ЧЕЛОВЕКА (СТАНДАРТ)",
-            "3 ЧЕЛОВЕКА (СОКРАЩЕННАЯ)",
-            "СТАЖЕРСКАЯ СМЕНА"
+            "7 человек",
+            "4 человека",
+            "3 человека",
+            "стажерская"
         };
 
         private readonly List<string> tutorialChoices = new List<string>
         {
-            "ВКЛЮЧИТЬ ОБУЧЕНИЕ",
-            "ПРОПУСТИТЬ ОБУЧЕНИЕ"
+            "включить",
+            "пропустить"
         };
 
         private readonly List<string> musicVolumeChoices = new List<string>
         {
-            "ГРОМКОСТЬ 35%",
-            "ГРОМКОСТЬ 15%",
-            "ГРОМКОСТЬ 60%",
-            "МУЗЫКА ВЫКЛ."
+            "35%",
+            "15%",
+            "60%",
+            "выкл."
         };
 
         private readonly List<string> startSpeedChoices = new List<string>
         {
-            "СТАРТ x1",
-            "СТАРТ x2",
-            "СТАРТ x5"
+            "x1",
+            "x2",
+            "x5"
         };
 
         private readonly List<string> shiftDurationChoices = new List<string>
         {
-            "СМЕНА 8 МИН",
-            "СМЕНА 6 МИН",
-            "СМЕНА 12 МИН"
+            "8 мин",
+            "6 мин",
+            "12 мин"
         };
 
         private readonly List<string> supervisorPaceChoices = new List<string>
         {
-            "ЗАДАЧИ: НОРМАЛЬНО",
-            "ЗАДАЧИ: ЧАЩЕ",
-            "ЗАДАЧИ: РЕЖЕ"
+            "нормально",
+            "чаще",
+            "реже"
+        };
+
+        private readonly List<string> resolutionChoices = new List<string>
+        {
+            "Авто",
+            "1920 x 1080",
+            "1600 x 900",
+            "1366 x 768",
+            "1280 x 720",
+            "2560 x 1440",
+            "Полный экран"
         };
 
         private DrillingModel drillingModel;
@@ -135,6 +146,7 @@ namespace SCADASim.UI
 
         private UIDocument document;
         private PanelSettings panelSettings;
+        private VisualElement scaledViewport;
         private VisualElement startScreen;
         private VisualElement mainScreen;
         private VisualElement introScreen;
@@ -150,15 +162,7 @@ namespace SCADASim.UI
         private Label tutorialBody;
         private float nextRefreshTime;
         private int tutorialStepIndex;
-        private VideoPlayer introVideoPlayer;
-        private AudioSource introAudioSource;
-        private RenderTexture introRenderTexture;
-        private Image introVideoImage;
-        private Texture2D[] introFrames;
         private bool introCompleted;
-        private bool introPrepared;
-        private double introLastVideoTime;
-        private float introLastProgressAt;
 
         private ChoiceBinding locationChoice;
         private ChoiceBinding profileChoice;
@@ -172,6 +176,7 @@ namespace SCADASim.UI
         private ChoiceBinding startSpeedChoice;
         private ChoiceBinding shiftDurationChoice;
         private ChoiceBinding supervisorPaceChoice;
+        private ChoiceBinding resolutionChoice;
 
         private Label configLine;
         private Label rigModelStatus;
@@ -192,6 +197,7 @@ namespace SCADASim.UI
         private Image aiAssistantImage;
         private Label aiAssistantCaption;
         private Label aiRecommendationValue;
+        private Label aiCrewAdvisorValue;
         private Label supervisorTaskValue;
         private Label taskEconomyValue;
         private Label incidentConsequenceValue;
@@ -278,6 +284,13 @@ namespace SCADASim.UI
             ShowTelemetryPage();
         }
 
+        public void DebugStartProfileSessionForCapture()
+        {
+            ApplyConfigAndStart();
+            HideTutorialOverlay();
+            ShowProfilePage();
+        }
+
         private void OnDestroy()
         {
             if (eventChannel != null)
@@ -290,11 +303,6 @@ namespace SCADASim.UI
                 Destroy(panelSettings);
             }
 
-            if (introRenderTexture != null)
-            {
-                introRenderTexture.Release();
-                Destroy(introRenderTexture);
-            }
         }
 
         private void Update()
@@ -310,6 +318,8 @@ namespace SCADASim.UI
 
         private void Build()
         {
+            ApplyDisplayResolution(0);
+
             document = gameObject.GetComponent<UIDocument>();
             if (document == null)
             {
@@ -318,10 +328,7 @@ namespace SCADASim.UI
             document.enabled = false;
 
             panelSettings = ScriptableObject.CreateInstance<PanelSettings>();
-            panelSettings.scaleMode = PanelScaleMode.ScaleWithScreenSize;
-            panelSettings.referenceResolution = new Vector2Int(1600, 900);
-            panelSettings.screenMatchMode = PanelScreenMatchMode.MatchWidthOrHeight;
-            panelSettings.match = 0.5f;
+            panelSettings.scaleMode = PanelScaleMode.ConstantPixelSize;
 
             ThemeStyleSheet themeStyleSheet = Resources.Load<ThemeStyleSheet>("SCADASim/UnityDefaultRuntimeTheme");
             if (themeStyleSheet != null)
@@ -336,6 +343,7 @@ namespace SCADASim.UI
             VisualElement root = document.rootVisualElement;
             root.Clear();
             root.AddToClassList("scada-root");
+            root.RegisterCallback<GeometryChangedEvent>(_ => UpdateViewportScale());
 
             StyleSheet styleSheet = Resources.Load<StyleSheet>("SCADASim/ScadaDashboard");
             if (styleSheet != null)
@@ -343,11 +351,97 @@ namespace SCADASim.UI
                 root.styleSheets.Add(styleSheet);
             }
 
-            BuildStartScreen(root);
-            BuildMainScreen(root);
-            BuildIntroScreen(root);
+            scaledViewport = new VisualElement();
+            scaledViewport.AddToClassList("scada-viewport");
+            root.Add(scaledViewport);
+
+            BuildStartScreen(scaledViewport);
+            BuildMainScreen(scaledViewport);
+            BuildIntroScreen(scaledViewport);
+            UpdateViewportScale();
 
             ShowIntroOrStartScreen();
+        }
+
+        private void UpdateViewportScale()
+        {
+            if (document == null || scaledViewport == null)
+            {
+                return;
+            }
+
+            VisualElement root = document.rootVisualElement;
+            float width = root.resolvedStyle.width;
+            float height = root.resolvedStyle.height;
+            if (width <= 0f || height <= 0f)
+            {
+                return;
+            }
+
+            float scale = Mathf.Min(width / DesignWidth, height / DesignHeight);
+            if (scale <= 0f)
+            {
+                return;
+            }
+
+            scaledViewport.style.width = Mathf.Max(DesignWidth, width / scale);
+            scaledViewport.style.height = Mathf.Max(DesignHeight, height / scale);
+            scaledViewport.style.left = 0f;
+            scaledViewport.style.top = 0f;
+            scaledViewport.style.scale = new Scale(new Vector3(scale, scale, 1f));
+        }
+
+        private void ApplyDisplayResolution(int choiceIndex)
+        {
+            if (Application.isEditor)
+            {
+                return;
+            }
+
+            ResolveResolution(choiceIndex, out int width, out int height, out FullScreenMode mode);
+            Screen.SetResolution(width, height, mode);
+            StartCoroutine(RefreshViewportScaleAfterResolutionChange());
+        }
+
+        private IEnumerator RefreshViewportScaleAfterResolutionChange()
+        {
+            yield return null;
+            UpdateViewportScale();
+        }
+
+        private static void ResolveResolution(int choiceIndex, out int width, out int height, out FullScreenMode mode)
+        {
+            Resolution current = Screen.currentResolution;
+            width = Mathf.Max(1280, current.width);
+            height = Mathf.Max(720, current.height);
+            mode = FullScreenMode.Windowed;
+
+            switch (choiceIndex)
+            {
+                case 1:
+                    width = 1920;
+                    height = 1080;
+                    break;
+                case 2:
+                    width = 1600;
+                    height = 900;
+                    break;
+                case 3:
+                    width = 1366;
+                    height = 768;
+                    break;
+                case 4:
+                    width = 1280;
+                    height = 720;
+                    break;
+                case 5:
+                    width = 2560;
+                    height = 1440;
+                    break;
+                case 6:
+                    mode = FullScreenMode.FullScreenWindow;
+                    break;
+            }
         }
 
         private void BuildIntroScreen(VisualElement root)
@@ -356,152 +450,34 @@ namespace SCADASim.UI
             introScreen.AddToClassList("intro-screen");
             root.Add(introScreen);
 
-            Image videoImage = new Image();
-            videoImage.AddToClassList("intro-video");
-            introScreen.Add(videoImage);
-            introVideoImage = videoImage;
+            VisualElement logoBlock = new VisualElement();
+            logoBlock.AddToClassList("intro-logo-block");
+            introScreen.Add(logoBlock);
 
-            Label caption = new Label("SCADA INTELLIGENT SIMULATION v2.0");
+            Label logo = new Label("ZVZ");
+            logo.AddToClassList("intro-logo");
+            logoBlock.Add(logo);
+
+            VisualElement rule = new VisualElement();
+            rule.AddToClassList("intro-logo-rule");
+            logoBlock.Add(rule);
+
+            Label caption = new Label("SCADA INTELLIGENT SIMULATION v4");
             caption.AddToClassList("intro-caption");
-            introScreen.Add(caption);
+            logoBlock.Add(caption);
 
             Button skipButton = new Button(FinishIntro);
             skipButton.text = "ПРОПУСТИТЬ";
             skipButton.AddToClassList("intro-skip-button");
             introScreen.Add(skipButton);
 
-            if (TryStartFrameSequenceIntro())
-            {
-                return;
-            }
-
-            string videoPath = Path.Combine(Application.streamingAssetsPath, "CompanyIntro_unity.mp4");
-            if (!File.Exists(videoPath))
-            {
-                videoPath = Path.Combine(Application.streamingAssetsPath, "CompanyIntro.mp4");
-            }
-
-            if (!File.Exists(videoPath))
-            {
-                introCompleted = true;
-                introScreen.style.display = DisplayStyle.None;
-                return;
-            }
-
-            introRenderTexture = new RenderTexture(1600, 900, 0, RenderTextureFormat.ARGB32)
-            {
-                antiAliasing = 2,
-                name = "Company Intro Video"
-            };
-            videoImage.image = introRenderTexture;
-
-            introAudioSource = gameObject.AddComponent<AudioSource>();
-            introAudioSource.playOnAwake = false;
-
-            introVideoPlayer = gameObject.AddComponent<VideoPlayer>();
-            introVideoPlayer.playOnAwake = false;
-            introVideoPlayer.isLooping = false;
-            introVideoPlayer.waitForFirstFrame = false;
-            introVideoPlayer.skipOnDrop = true;
-            introVideoPlayer.source = VideoSource.Url;
-            introVideoPlayer.url = videoPath;
-            introVideoPlayer.renderMode = VideoRenderMode.RenderTexture;
-            introVideoPlayer.targetTexture = introRenderTexture;
-            introVideoPlayer.audioOutputMode = VideoAudioOutputMode.AudioSource;
-            introVideoPlayer.EnableAudioTrack(0, true);
-            introVideoPlayer.SetTargetAudioSource(0, introAudioSource);
-            introVideoPlayer.prepareCompleted += _ =>
-            {
-                introPrepared = true;
-                introLastVideoTime = introVideoPlayer.time;
-                introLastProgressAt = Time.unscaledTime;
-                introVideoPlayer.Play();
-            };
-            introVideoPlayer.loopPointReached += _ => FinishIntro();
-            introVideoPlayer.errorReceived += (_, message) =>
-            {
-                Debug.LogWarning($"Company intro video error: {message}");
-                FinishIntro();
-            };
-            introVideoPlayer.Prepare();
-            StartCoroutine(WatchIntroPlayback());
+            StartCoroutine(PlayLogoIntro());
         }
 
-        private bool TryStartFrameSequenceIntro()
+        private IEnumerator PlayLogoIntro()
         {
-            introFrames = Resources.LoadAll<Texture2D>("SCADASim/IntroFrames");
-            if (introFrames == null || introFrames.Length == 0 || introVideoImage == null)
-            {
-                return false;
-            }
-
-            System.Array.Sort(introFrames, (left, right) => string.CompareOrdinal(left.name, right.name));
-            StartCoroutine(PlayIntroFrames());
-            return true;
-        }
-
-        private IEnumerator PlayIntroFrames()
-        {
-            const float frameDelaySeconds = 1f / 12f;
-
-            for (int i = 0; i < introFrames.Length && !introCompleted; i++)
-            {
-                introVideoImage.image = introFrames[i];
-                yield return new WaitForSecondsRealtime(frameDelaySeconds);
-            }
-
+            yield return new WaitForSecondsRealtime(2.8f);
             FinishIntro();
-        }
-
-        private IEnumerator WatchIntroPlayback()
-        {
-            float startedAt = Time.unscaledTime;
-            introLastProgressAt = startedAt;
-
-            while (!introCompleted)
-            {
-                yield return null;
-
-                float elapsed = Time.unscaledTime - startedAt;
-                if (elapsed > 14f)
-                {
-                    FinishIntro();
-                    yield break;
-                }
-
-                if (!introPrepared)
-                {
-                    if (elapsed > 4f)
-                    {
-                        Debug.LogWarning("Company intro video prepare timeout. Skipping intro.");
-                        FinishIntro();
-                        yield break;
-                    }
-
-                    continue;
-                }
-
-                if (introVideoPlayer == null)
-                {
-                    FinishIntro();
-                    yield break;
-                }
-
-                double currentTime = introVideoPlayer.time;
-                if (currentTime > introLastVideoTime + 0.03)
-                {
-                    introLastVideoTime = currentTime;
-                    introLastProgressAt = Time.unscaledTime;
-                    continue;
-                }
-
-                if (Time.unscaledTime - introLastProgressAt > 2.8f)
-                {
-                    Debug.LogWarning("Company intro video stalled. Skipping intro.");
-                    FinishIntro();
-                    yield break;
-                }
-            }
         }
 
         private void BuildStartScreen(VisualElement root)
@@ -513,7 +489,7 @@ namespace SCADASim.UI
             VisualElement titleBar = new VisualElement();
             titleBar.AddToClassList("window-titlebar");
             startScreen.Add(titleBar);
-            titleBar.Add(new Label("LUKOIL X ZVZ :: ИНТЕЛЛЕКТУАЛЬНОЕ БУРЕНИЕ v3.1"));
+            titleBar.Add(new Label("LUKOIL X ZVZ :: SCADA INTELLIGENT SIMULATION v4"));
 
             VisualElement body = new VisualElement();
             body.AddToClassList("start-body");
@@ -535,11 +511,11 @@ namespace SCADASim.UI
             zvz.AddToClassList("zvz-logo");
             brand.Add(zvz);
 
-            Label subtitle = new Label("S C A D A   I N T E L L I G E N T   S I M U L A T I O N   v 3 . 1");
+            Label subtitle = new Label("SCADA INTELLIGENT SIMULATION v4");
             subtitle.AddToClassList("start-subtitle");
             brand.Add(subtitle);
 
-            Label scenario = new Label("1500M: промежуточная колонна 245MM. Классическая глубина перехода осложненного участка - граница мягких глин и плотных песчаников. Здесь возрастают пластовое давление и начинаются реальные геологические вызовы.");
+            Label scenario = new Label("Минимальная панель запуска. Выберите параметры сценария, реализма, смены и интерфейса; все настройки применяются к физике бурения, задачам мастера и поведению бригады.");
             scenario.AddToClassList("scenario-box");
             brand.Add(scenario);
 
@@ -547,25 +523,26 @@ namespace SCADASim.UI
             configPanel.AddToClassList("start-config-panel");
             body.Add(configPanel);
 
-            Label configTitle = new Label("КОНФИГУРАЦИЯ СКВАЖИНЫ");
+            Label configTitle = new Label("ПАРАМЕТРЫ СИМУЛЯЦИИ");
             configTitle.AddToClassList("start-config-title");
             configPanel.Add(configTitle);
 
-            locationChoice = AddConfigChoice(configPanel, "ЛОКАЦИЯ:", locationChoices, 0);
-            profileChoice = AddConfigChoice(configPanel, "ПРОФИЛЬ СКВАЖИНЫ:", profileChoices, 0);
-            depthChoice = AddConfigChoice(configPanel, "НАЧАЛЬНАЯ ГЛУБИНА:", depthChoices, 0);
-            regionChoice = AddConfigChoice(configPanel, "ГЕОЛОГИЧЕСКИЙ РЕГИОН:", regionChoices, 0);
-            difficultyChoice = AddConfigChoice(configPanel, "РЕАЛИЗМ (СЛОЖНОСТЬ):", difficultyChoices, 0);
-            physicsChoice = AddConfigChoice(configPanel, "НАСТРОЙКИ ФИЗИКИ:", physicsChoices, 0);
-            crewChoice = AddConfigChoice(configPanel, "СОСТАВ БРИГАДЫ:", crewChoices, 0);
-            shiftDurationChoice = AddConfigChoice(configPanel, "ДЛИТЕЛЬНОСТЬ СМЕНЫ:", shiftDurationChoices, 0);
-            supervisorPaceChoice = AddConfigChoice(configPanel, "ЧАСТОТА ЗАДАЧ:", supervisorPaceChoices, 0);
-            startSpeedChoice = AddConfigChoice(configPanel, "СТАРТОВАЯ СКОРОСТЬ:", startSpeedChoices, 0);
-            musicVolumeChoice = AddConfigChoice(configPanel, "ГРОМКОСТЬ МУЗЫКИ:", musicVolumeChoices, 0);
-            tutorialChoice = AddConfigChoice(configPanel, "НАЧАЛЬНОЕ ОБУЧЕНИЕ:", tutorialChoices, 0);
+            locationChoice = AddConfigChoice(configPanel, "Локация", locationChoices, 0);
+            profileChoice = AddConfigChoice(configPanel, "Профиль", profileChoices, 0);
+            depthChoice = AddConfigChoice(configPanel, "Стартовая глубина", depthChoices, 0);
+            regionChoice = AddConfigChoice(configPanel, "Регион", regionChoices, 0);
+            difficultyChoice = AddConfigChoice(configPanel, "Реализм", difficultyChoices, 0);
+            physicsChoice = AddConfigChoice(configPanel, "Физика", physicsChoices, 0);
+            crewChoice = AddConfigChoice(configPanel, "Бригада", crewChoices, 0);
+            shiftDurationChoice = AddConfigChoice(configPanel, "Смена", shiftDurationChoices, 0);
+            supervisorPaceChoice = AddConfigChoice(configPanel, "Задачи", supervisorPaceChoices, 0);
+            startSpeedChoice = AddConfigChoice(configPanel, "Скорость", startSpeedChoices, 0);
+            musicVolumeChoice = AddConfigChoice(configPanel, "Музыка", musicVolumeChoices, 0);
+            resolutionChoice = AddConfigChoice(configPanel, "Разрешение", resolutionChoices, 0);
+            tutorialChoice = AddConfigChoice(configPanel, "Обучение", tutorialChoices, 0);
 
             Button startButton = new Button(ApplyConfigAndStart);
-            startButton.text = "ИНИЦИАЛИЗАЦИЯ СИСТЕМЫ";
+            startButton.text = "НАЧАТЬ СМЕНУ";
             startButton.AddToClassList("start-button");
             configPanel.Add(startButton);
         }
@@ -590,11 +567,11 @@ namespace SCADASim.UI
             VisualElement profileControls = new VisualElement();
             profileControls.AddToClassList("profile-view-buttons");
             tabs.Add(profileControls);
-            profileControls.Add(CreateFlatButton("СЛЕДИТЬ", () => cameraOrbit?.SetView(140f, 28f, 32f)));
-            profileControls.Add(CreateFlatButton("ВСЯ СКВАЖИНА", () => cameraOrbit?.SetView(145f, 38f, 62f)));
-            profileControls.Add(CreateFlatButton("3/4", () => cameraOrbit?.SetView(140f, 28f, 36f)));
-            profileControls.Add(CreateFlatButton("СБОКУ", () => cameraOrbit?.SetView(90f, 18f, 42f)));
-            profileControls.Add(CreateFlatButton("СВЕРХУ", () => cameraOrbit?.SetView(180f, 72f, 54f)));
+            profileControls.Add(CreateFlatButton("СЛЕДИТЬ", () => SetProfileCameraView(140f, 28f, 0.52f)));
+            profileControls.Add(CreateFlatButton("ВСЯ СКВАЖИНА", () => SetProfileCameraView(145f, 38f, 1.02f)));
+            profileControls.Add(CreateFlatButton("3/4", () => SetProfileCameraView(140f, 28f, 0.74f)));
+            profileControls.Add(CreateFlatButton("СБОКУ", () => SetProfileCameraView(90f, 18f, 0.86f)));
+            profileControls.Add(CreateFlatButton("СВЕРХУ", () => SetProfileCameraView(180f, 72f, 1.0f)));
             profileControls.Add(CreateFlatButton("x10 ВРЕМЯ", () => SetSimulationSpeed(10f)));
             profileControls.Add(CreateFlatButton("МУЗЫКА", ToggleMusic));
             profileControls.Add(CreateFlatButton("ГЛАВНОЕ МЕНЮ", ReturnToMainMenu));
@@ -716,7 +693,10 @@ namespace SCADASim.UI
             assistantRow.Add(aiAssistantCaption);
 
             aiRecommendationValue = AddStatusBox(aiPanel, "МОНИТОРИНГ: отклонений нет. Действие: продолжать текущий режим.");
+            aiCrewAdvisorValue = AddStatusBox(aiPanel, "ИИ-БРИГАДИР: смена на связи. Жду изменения параметров и внешних условий.");
+            aiCrewAdvisorValue.AddToClassList("ai-crew-advisor-box");
             supervisorTaskValue = AddStatusBox(aiPanel, "ЗАДАЧА: ожидание распоряжения бурового мастера.");
+            supervisorTaskValue.AddToClassList("supervisor-task-box");
             taskEconomyValue = AddStatusBox(aiPanel, "БЮДЖЕТ СМЕНЫ: 0 кредитов // выполнено 0 // провалено 0.");
             incidentConsequenceValue = AddStatusBox(aiPanel, "ПОСЛЕДСТВИЯ: простои 0 мин // приток 0% // поглощение 0%.");
         }
@@ -841,15 +821,19 @@ namespace SCADASim.UI
 
         private ChoiceBinding AddConfigChoice(VisualElement parent, string title, List<string> choices, int index)
         {
+            VisualElement row = new VisualElement();
+            row.AddToClassList("config-row");
+            parent.Add(row);
+
             Label label = new Label(title);
             label.AddToClassList("config-label");
-            parent.Add(label);
+            row.Add(label);
 
             ChoiceBinding binding = new ChoiceBinding(choices, Mathf.Clamp(index, 0, choices.Count - 1));
             Button button = new Button(binding.Next);
             button.AddToClassList("config-choice");
             binding.Bind(button);
-            parent.Add(button);
+            row.Add(button);
             return binding;
         }
 
@@ -857,6 +841,8 @@ namespace SCADASim.UI
         {
             SimulationRuntimeConfig config = BuildRuntimeConfigFromUI();
             Debug.Log($"SCADA simulation start: {config.EnvironmentType}, {config.ProfileType}, measured depth {config.StartMeasuredDepth:0}-{config.MaxMeasuredDepth:0} m.");
+
+            ApplyDisplayResolution(resolutionChoice != null ? resolutionChoice.Index : 0);
 
             environmentManager?.LoadEnvironment(config.EnvironmentType);
             rigModelManager?.LoadRigModel(config.EnvironmentType);
@@ -892,6 +878,10 @@ namespace SCADASim.UI
             radioLogValue.text = $"[00:00:01] Регион: {ToShortText(config.GeologyRegion)}. Бригада: {ToCrewSize(config.CrewPreset)} чел. Система запущена.";
             hasActiveSupervisorTask = false;
             supervisorTaskValue.text = "ЗАДАЧА: ожидание распоряжения бурового мастера.";
+            if (aiCrewAdvisorValue != null)
+            {
+                aiCrewAdvisorValue.text = "ИИ-БРИГАДИР: смена на связи. Жду изменения параметров и внешних условий.";
+            }
 
             ShowMainScreen();
             ShowTelemetryPage();
@@ -1073,7 +1063,7 @@ namespace SCADASim.UI
 
             if (hasActiveSupervisorTask && supervisorTaskValue != null)
             {
-                supervisorTaskValue.text = CompactStatus(FormatSupervisorTask(activeSupervisorTask), 360);
+                supervisorTaskValue.text = CompactStatus(FormatSupervisorTask(activeSupervisorTask), 520);
             }
 
             rotationGraph?.Push(state.SurfaceTorqueKnM, state.Vibration.LowFrequencyEnergy * 100f);
@@ -1095,6 +1085,16 @@ namespace SCADASim.UI
                 return;
             }
 
+            if (simulationEvent.Type == SimulationEventType.CrewAIAlert && simulationEvent.Payload is AIRecommendation crewRecommendation)
+            {
+                if (aiCrewAdvisorValue != null)
+                {
+                    aiCrewAdvisorValue.text = FormatAIRecommendation(crewRecommendation);
+                }
+
+                return;
+            }
+
             if (simulationEvent.Type == SimulationEventType.OperationalIncident && simulationEvent.Payload is OperationalIncident incident)
             {
                 aiRecommendationValue.text = CompactStatus($"{incident.Title.ToUpperInvariant()}: {incident.Message}", 170);
@@ -1113,7 +1113,7 @@ namespace SCADASim.UI
                 hasActiveSupervisorTask = true;
                 if (supervisorTaskValue != null)
                 {
-                    supervisorTaskValue.text = CompactStatus(FormatSupervisorTask(task), 320);
+                    supervisorTaskValue.text = CompactStatus(FormatSupervisorTask(task), 520);
                 }
 
                 radioLogValue.text = $"[{FormatClock()}] {task.Title}: {task.Objective}";
@@ -1183,16 +1183,12 @@ namespace SCADASim.UI
             }
 
             introCompleted = true;
-            if (introVideoPlayer != null)
-            {
-                introVideoPlayer.Stop();
-            }
-
             ShowStartScreen();
         }
 
         private void ShowMainScreen()
         {
+            introCompleted = true;
             if (introScreen != null)
             {
                 introScreen.style.display = DisplayStyle.None;
@@ -1257,50 +1253,74 @@ namespace SCADASim.UI
             switch (tutorialStepIndex)
             {
                 case 0:
-                    tutorialTitle.text = "1/8  ЦЕЛЬ СМЕНЫ";
-                    tutorialBody.text = "Держите скважину в безопасном окне давлений: забойное давление должно быть выше пластового, но ниже давления гидроразрыва. Следите за расходом вход/выход: рост выхода и газа говорит о притоке, падение выхода - о поглощении.";
+                    tutorialTitle.text = "1/12  ЦЕЛЬ СМЕНЫ";
+                    tutorialBody.text = "Главная цель - держать скважину в безопасном окне давлений. Забойное давление должно быть выше пластового, но ниже давления гидроразрыва. Если забойное ниже пластового - растет риск притока. Если забойное близко к гидроразрыву - растет риск поглощения.";
                     tutorialNextButton.text = "ДАЛЕЕ";
                     break;
 
                 case 1:
-                    tutorialTitle.text = "2/8  УПРАВЛЕНИЕ";
-                    tutorialBody.text = "Обороты влияют на момент и вибрацию, нагрузка - на скорость проходки и износ долота, расход - на вынос шлама и давление насоса. Плотность раствора и штуцер меняют эквивалентную плотность, поэтому ими нельзя работать резко.";
+                    tutorialTitle.text = "2/12  ПАРАМЕТРЫ УПРАВЛЕНИЯ";
+                    tutorialBody.text = "Обороты управляют моментом и автоколебаниями. Нагрузка на долото управляет скоростью проходки, но ускоряет износ и вибрацию. Расход улучшает вынос шлама, но поднимает давление насоса. Плотность раствора и штуцер меняют эквивалентную плотность и окно давлений.";
                     tutorialNextButton.text = "ДАЛЕЕ";
                     break;
 
                 case 2:
-                    tutorialTitle.text = "3/8  БРИГАДА";
-                    tutorialBody.text = "Бригада теперь работает ролями. Растворщик, механик, инженер ННБ и буровой мастер выполняют процедуры с разным качеством. Усталость повышает задержку и шанс ошибки, инструктаж и хорошая организация снижают риск.";
+                    tutorialTitle.text = "3/12  ГРАФИКИ И ДАТЧИКИ";
+                    tutorialBody.text = "На графиках важен не шум, а тренд. Рост момента вместе с вибрацией говорит о механической нестабильности. Рост давления насоса при плохой очистке указывает на сальникообразование. Разница расхода вход/выход показывает приток или поглощение.";
                     tutorialNextButton.text = "ДАЛЕЕ";
                     break;
 
                 case 3:
-                    tutorialTitle.text = "4/8  ЗАДАЧИ ОТ МАСТЕРА";
-                    tutorialBody.text = "Задачи появляются последовательно и имеют реальный таймер. Если время истекло, система выдает новую вводную и фиксирует последствия: простои, рост риска притока, поглощения или прихвата.";
+                    tutorialTitle.text = "4/12  МЕНЮ ЗАПУСКА";
+                    tutorialBody.text = "Главное меню работает как набор параметров. Локация, профиль, глубина и регион задают геометрию и геологию. Реализм, физика, состав бригады, длительность смены и частота задач меняют поведение модели. Разрешение в режиме Авто берется с текущего устройства; ручной режим принудительно меняет окно.";
                     tutorialNextButton.text = "ДАЛЕЕ";
                     break;
 
                 case 4:
-                    tutorialTitle.text = "5/8  АВАРИЙНЫЕ ПРОЦЕДУРЫ";
-                    tutorialBody.text = "Кнопки бригады - это не магия, а полевые процедуры. При притоке используйте глушение, при поглощении - материал от поглощения и снижение расхода, при прихвате - расхаживание, при автоколебаниях - снижение оборотов и нагрузки.";
+                    tutorialTitle.text = "5/12  ИИ-РЕКОМЕНДАЦИИ";
+                    tutorialBody.text = "ИИ-рекомендация всегда состоит из причины и действия. Причина объясняет, какой тренд опасен. Действие говорит, какой параметр менять: обороты, нагрузку, расход, плотность раствора или штуцер. Выполняйте изменения ступенями, затем проверяйте датчики.";
                     tutorialNextButton.text = "ДАЛЕЕ";
                     break;
 
                 case 5:
-                    tutorialTitle.text = "6/8  СКОРОСТЬ ВРЕМЕНИ";
-                    tutorialBody.text = "Кнопки x1/x2/x5/x10/x20 ускоряют физику бурения и таймер задач одновременно. Если включили x10, дедлайн мастера тоже пройдет в десять раз быстрее.";
+                    tutorialTitle.text = "6/12  ЗАДАЧИ ОТ МАСТЕРА";
+                    tutorialBody.text = "В задаче смотрите четыре блока: критерий успеха, план инженера, контрольные датчики и срок. План инженера прямо указывает, что менять. Например: при притоке - прикрыть штуцер и поднять плотность; при поглощении - снизить расход и открыть штуцер.";
                     tutorialNextButton.text = "ДАЛЕЕ";
                     break;
 
                 case 6:
-                    tutorialTitle.text = "7/8  3D И КАМЕРА";
-                    tutorialBody.text = "В 3D-профиле видно текущую позицию долота, станции глубины по стволу и цветовую зону риска. При наклонном и горизонтальном бурении следите за шламовой постелью, сопротивлением движению, автоколебаниями, притоком и поглощением.";
+                    tutorialTitle.text = "7/12  ПРИМЕРЫ РЕШЕНИЙ";
+                    tutorialBody.text = "Приток: цель - выход не выше входа, газ ниже 6%, забойное давление выше пластового. Действия: штуцер -5..10%, плотность +0.02..0.05 SG. Поглощение: цель - восстановить выход и не разогнать давление. Действия: расход -100..250 л/мин, штуцер +5..10%.";
+                    tutorialNextButton.text = "ДАЛЕЕ";
+                    break;
+
+                case 7:
+                    tutorialTitle.text = "8/12  БРИГАДА И СМЕНЫ";
+                    tutorialBody.text = "Бригада работает ролями: буровой мастер, бурильщик, растворщик, механик и инженер направленного бурения. Смена дня меняет людей и профиль опыта. Усталость увеличивает задержку команд и вероятность ошибки уставки. Инструктаж, осмотр и план рейса снижают операционный риск.";
+                    tutorialNextButton.text = "ДАЛЕЕ";
+                    break;
+
+                case 8:
+                    tutorialTitle.text = "9/12  ПОЛЕВЫЕ ПРОЦЕДУРЫ";
+                    tutorialBody.text = "Процедуры бригады не заменяют крутилки, а дополняют их. Промывка помогает очистке ствола, замер раствора улучшает контроль плотности, осмотр вышки снижает риск отказа оборудования, расхаживание помогает при прихвате, снижение автоколебаний корректирует обороты и нагрузку.";
+                    tutorialNextButton.text = "ДАЛЕЕ";
+                    break;
+
+                case 9:
+                    tutorialTitle.text = "10/12  СКОРОСТЬ ВРЕМЕНИ";
+                    tutorialBody.text = "Кнопки x1/x2/x5/x10/x20 ускоряют физику, усталость бригады и таймер задач одновременно. Для диагностики и сложных задач используйте x1 или x2. x10 и x20 удобны для ожидания, но опасны при притоке, поглощении и пересменке.";
+                    tutorialNextButton.text = "ДАЛЕЕ";
+                    break;
+
+                case 10:
+                    tutorialTitle.text = "11/12  3D-ПРОФИЛЬ";
+                    tutorialBody.text = "3D-вкладка показывает положение долота, направление движения, станции глубины по стволу и суммарную зону риска. В наклонных и горизонтальных участках растут сопротивление движению, шламовая постель и автоколебания, поэтому решения по расходу, нагрузке и оборотам становятся важнее.";
                     tutorialNextButton.text = "ДАЛЕЕ";
                     break;
 
                 default:
-                    tutorialTitle.text = "8/8  МУЗЫКА И ОКНО";
-                    tutorialBody.text = "Окно теперь можно менять по размеру: интерфейс масштабируется от базовой сетки 1600x900 и сохраняет взаимное расположение блоков. Музыка из папки Aphex Twin доступна в панели управления.";
+                    tutorialTitle.text = "12/12  ОКНО И ИТОГ";
+                    tutorialBody.text = "Интерфейс подстраивается под выбранное разрешение и сохраняет читаемость при изменении окна. На устройстве 1920x1080 можно оставить Авто: приложение откроет это разрешение и масштабирует рабочий экран. Во время смены ориентируйтесь на критерий задачи, план инженера, умные графики и журнал бригады.";
                     tutorialNextButton.text = "НАЧАТЬ СМЕНУ";
                     break;
             }
@@ -1316,9 +1336,19 @@ namespace SCADASim.UI
             crewTab.RemoveFromClassList("tab-active");
             if (cameraOrbit != null)
             {
-                cameraOrbit.SetTarget(ResolveWellboreViewTarget());
-                cameraOrbit.SetView(140f, 30f, 58f);
+                SetProfileCameraView(140f, 30f, 0.78f);
             }
+        }
+
+        private void SetProfileCameraView(float yaw, float pitch, float distanceFactor)
+        {
+            if (cameraOrbit == null)
+            {
+                return;
+            }
+
+            cameraOrbit.SetTarget(ResolveWellboreViewTarget());
+            cameraOrbit.SetView(yaw, pitch, ResolveWellboreViewDistance(distanceFactor));
         }
 
         private void ShowCrewPage()
@@ -1363,6 +1393,31 @@ namespace SCADASim.UI
             Vector3 start = wellbore.transform.TransformPoint(wellbore.Samples[0].Position);
             Vector3 end = wellbore.transform.TransformPoint(wellbore.Samples[wellbore.Samples.Count - 1].Position);
             return (start + end) * 0.5f + Vector3.up * 4f;
+        }
+
+        private float ResolveWellboreViewDistance(float distanceFactor)
+        {
+            if (wellbore == null || wellbore.Samples.Count < 2)
+            {
+                return 58f;
+            }
+
+            Vector3 min = wellbore.transform.TransformPoint(wellbore.Samples[0].Position);
+            Vector3 max = min;
+            for (int i = 1; i < wellbore.Samples.Count; i++)
+            {
+                Vector3 point = wellbore.transform.TransformPoint(wellbore.Samples[i].Position);
+                min = Vector3.Min(min, point);
+                max = Vector3.Max(max, point);
+            }
+
+            Vector3 size = max - min;
+            float dominantExtent = Mathf.Max(size.x, size.y, size.z) * 0.5f;
+            float diagonalExtent = size.magnitude * 0.5f;
+            float fieldOfView = Camera.main != null ? Camera.main.fieldOfView : 48f;
+            float fitDistance = Mathf.Max(dominantExtent * 1.35f, diagonalExtent) /
+                                Mathf.Tan(fieldOfView * 0.5f * Mathf.Deg2Rad);
+            return Mathf.Clamp(fitDistance * Mathf.Max(0.35f, distanceFactor), 38f, 220f);
         }
 
         private void AdjustRpm(float delta)
@@ -1690,6 +1745,10 @@ namespace SCADASim.UI
             panel.AddToClassList("graph-panel");
             parent.Add(panel);
 
+            Label help = new Label(GetGraphExplanation(title));
+            help.AddToClassList("graph-help-label");
+            panel.Add(help);
+
             VisualElement graphContainer = new VisualElement();
             graphContainer.AddToClassList("graph-container");
             graphContainer.style.flexGrow = 1;
@@ -1703,6 +1762,24 @@ namespace SCADASim.UI
             graphContainer.Add(graph);
 
             return graph;
+        }
+
+        private static string GetGraphExplanation(string title)
+        {
+            switch (title)
+            {
+                case "ВРАЩЕНИЕ И МОМЕНТ":
+                    return "Момент = сопротивление вращению долота и колонны, кНм. Вибрация = низкочастотные колебания КНБК; быстрый рост означает риск stick-slip, прихвата или перегруза привода.";
+
+                case "ГИДРАВЛИКА И РАСХОД":
+                    return "Давление насоса показывает нагрузку на циркуляцию. Баланс расхода = выход минус вход: плюс намекает на приток, минус на поглощение или потери.";
+
+                case "СКОРОСТЬ ПРОХОДКИ И ИЗНОС":
+                    return "Скорость проходки = метры в час. Красная линия объединяет износ долота и риск прихвата: если она растет при падении скорости, режим лучше смягчить.";
+
+                default:
+                    return "Линии показывают текущий тренд за последние секунды. Цвета совпадают с подписями осей, безопасный коридор подсвечен фоном.";
+            }
         }
 
         private static WellboreProfileType ResolveProfile(int index)
@@ -1982,7 +2059,7 @@ namespace SCADASim.UI
                 action += ".";
             }
 
-            return CompactStatus($"ИИ: {severity}. {recommendation.Title}. Действие: {action}", 155);
+            return CompactStatus($"ИИ: {severity}. {recommendation.Title}. Причина: {recommendation.Message} Действие: {action}", 240);
         }
 
         private static string CompactStatus(string text, int maxCharacters)
@@ -2004,7 +2081,80 @@ namespace SCADASim.UI
                 ? FormatCountdown(remainingMinutes)
                 : "СРОК ИСТЕК";
 
-            return $"ЗАДАЧА: {task.Title}. До срока: {timerText}. Бонус +{task.RewardCredits} / штраф -{task.FailurePenaltyCredits} кредитов. Цель: {task.Objective} Контроль: {task.SensorFocus} Действие: {task.ControlHints} Критерий: {task.SuccessCriteria}";
+            return $"ЗАДАЧА: {task.Title}. До срока: {timerText}. Критерий: {task.SuccessCriteria} План инженера: {BuildEngineeringTaskGuide(task)} Контроль: {task.SensorFocus}. Бонус +{task.RewardCredits} / штраф -{task.FailurePenaltyCredits}.";
+        }
+
+        private string BuildEngineeringTaskGuide(SupervisorTask task)
+        {
+            if (drillingModel == null)
+            {
+                return task.ControlHints;
+            }
+
+            DrillingState state = drillingModel.CurrentState;
+            float flowIn = Mathf.Max(0.1f, state.FlowRateLps);
+            float flowBalancePercent = (state.FlowOutLps - state.FlowRateLps) / flowIn * 100f;
+            float vibrationG = state.Vibration.LowFrequencyEnergy * 3.5f;
+            float lowMargin = state.BottomHolePressureMPa - state.PorePressureMPa;
+            float highMargin = state.FracturePressureMPa - state.BottomHolePressureMPa;
+            float flowLpm = state.FlowRateLps * 60f;
+
+            switch (task.Type)
+            {
+                case SupervisorTaskType.KickControl:
+                    return $"сейчас выход {flowBalancePercent:+0.0;-0.0;0.0}%, газ {state.GasUnitsPercent:0.0}%, запас к пластовому {lowMargin:0.0} МПа. Прикрывайте штуцер на 5-10% и поднимайте плотность на 0.02-0.05 SG до запаса >0.25 МПа; обороты и нагрузку не повышать.";
+
+                case SupervisorTaskType.LossControl:
+                    return $"сейчас выход {flowBalancePercent:+0.0;-0.0;0.0}%, расход {flowLpm:0} л/мин. Снизьте расход на 100-250 л/мин и откройте штуцер на 5-10%; плотность не повышать, пока выход не лучше -5%.";
+
+                case SupervisorTaskType.DirectionalDrag:
+                    return $"сейчас сопротивление {state.DragTonnes:0.0} т, очистка {state.CuttingsTransportEfficiency01 * 100f:0}%, вибрация {vibrationG:0.0} g. Снизьте нагрузку на 0.5-2 т, при плохой очистке добавьте расход 100-200 л/мин, при вибрации снизьте обороты на 10-20.";
+
+                case SupervisorTaskType.HoleCleaning:
+                    return $"сейчас очистка {state.CuttingsTransportEfficiency01 * 100f:0}%, давление насоса {state.StandpipePressureBar:0} бар. Поднимайте расход ступенями по 100 л/мин, снизьте нагрузку на 1-2 т и выполните промывку ствола; остановиться, если давление насоса растет >12 бар.";
+
+                case SupervisorTaskType.ShaleStability:
+                    return $"сейчас запас к пластовому {lowMargin:0.0} МПа, до гидроразрыва {highMargin:0.0} МПа. Если нижний запас <0.25 МПа - плотность +0.01-0.03 SG или штуцер -5%; если верхний запас <0.45 МПа - плотность -0.01-0.03 SG или штуцер +5%.";
+
+                case SupervisorTaskType.BitAssessment:
+                    return $"сейчас вибрация {vibrationG:0.0} g, момент {state.SurfaceTorqueKnM:0.0} кНм, скорость {state.RopMPerHour:0.0} м/ч. Снизьте нагрузку на 1-3 т и обороты на 10-25; затем возвращайте нагрузку только если вибрация <2.2 g.";
+
+                case SupervisorTaskType.PressureWindow:
+                    return $"сейчас запас к пластовому {lowMargin:0.0} МПа, до гидроразрыва {highMargin:0.0} МПа. Работайте плотностью по 0.01-0.03 SG и штуцером по 5%; держите оба запаса положительными и не меняйте расход резко.";
+
+                case SupervisorTaskType.CrewHandover:
+                    return $"сейчас усталость смены высокая. Выполните инструктаж, осмотр вышки и план рейса; держите скорость времени x1 и не отправляйте лишние команды, пока усталость не снизится ниже 58%.";
+
+                case SupervisorTaskType.PumpEfficiency:
+                    return $"сейчас расход {flowLpm:0} л/мин, очистка {state.CuttingsTransportEfficiency01 * 100f:0}%, давление насоса {state.StandpipePressureBar:0} бар. Если очистка <64% - расход +100 л/мин; если давление выросло >18 бар - расход -100 л/мин и проверьте вынос.";
+
+                case SupervisorTaskType.GasMonitoring:
+                    return $"сейчас газ {state.GasUnitsPercent:0.0}%, выход {flowBalancePercent:+0.0;-0.0;0.0}%, запас к пластовому {lowMargin:0.0} МПа. Не снижайте давление, поручите бригаде контроль дегазатора и емкостей.";
+
+                case SupervisorTaskType.ToolfaceControl:
+                    return $"сейчас dogleg {state.DoglegSeverityDegPer30m:0.0}°/30 м, зенит {state.InclinationDegrees:0.0}°, drag {state.DragTonnes:0.0} т. Снизьте грубую нагрузку и запросите контрольный MWD-замер.";
+
+                case SupervisorTaskType.PumpIntegrity:
+                    return $"сейчас давление насоса {state.StandpipePressureBar:0} бар, расход {flowLpm:0} л/мин, баланс {flowBalancePercent:+0.0;-0.0;0.0}%. Меняйте расход ступенями и отправьте механику на проверку насосов.";
+
+                case SupervisorTaskType.EquipmentInspection:
+                    return $"сейчас момент {state.SurfaceTorqueKnM:0.0} кНм, вибрация {vibrationG:0.0} g. Выполните осмотр вышки/верхнего привода и избегайте одновременного изменения оборотов, нагрузки и расхода.";
+
+                case SupervisorTaskType.WeatherResponse:
+                    return $"внешние условия мешают работе смены. Проведите инструктаж, подтвердите связь и контроль емкостей; параметры менять медленнее обычного.";
+
+                case SupervisorTaskType.MwdSurvey:
+                    return $"сейчас зенит {state.InclinationDegrees:0.0}°, азимут {state.AzimuthDegrees:0}°, dogleg {state.DoglegSeverityDegPer30m:0.0}°/30 м. До замера ННБ держите мягкий режим без форсирования угла.";
+
+                case SupervisorTaskType.TorqueSmoothing:
+                    return $"сейчас момент {state.SurfaceTorqueKnM:0.0} кНм, вибрация {vibrationG:0.0} g. Снизьте обороты и нагрузку малыми шагами; возвращайте режим только после стабилизации момента.";
+
+                case SupervisorTaskType.ConnectionProcedure:
+                    return $"сейчас баланс {flowBalancePercent:+0.0;-0.0;0.0}%, давление насоса {state.StandpipePressureBar:0} бар. Перед наращиванием стабилизируйте циркуляцию и проведите чек-лист бригады.";
+
+                default:
+                    return $"держите скорость проходки >10 м/ч при вибрации <2.2 g: обороты и нагрузку повышать малыми шагами, расход держать под очистку, плотность и штуцер не выводить из окна давлений.";
+            }
         }
 
         private static string FormatCountdown(float minutes)
@@ -2243,46 +2393,60 @@ namespace SCADASim.UI
             public readonly string Title;
             public readonly float DefaultMin;
             public readonly float DefaultMax;
+            public readonly float SafeMin;
+            public readonly float SafeMax;
+            public readonly bool HasSafeRange;
 
-            public GraphAxisScale(string title, float defaultMin, float defaultMax)
+            public GraphAxisScale(string title, float defaultMin, float defaultMax, float safeMin = float.NaN, float safeMax = float.NaN)
             {
                 Title = title;
                 DefaultMin = Mathf.Min(defaultMin, defaultMax);
                 DefaultMax = Mathf.Max(defaultMin, defaultMax);
+                SafeMin = Mathf.Min(safeMin, safeMax);
+                SafeMax = Mathf.Max(safeMin, safeMax);
+                HasSafeRange = !float.IsNaN(safeMin) && !float.IsNaN(safeMax);
             }
 
             public void GetRange(List<float> values, out float min, out float max)
             {
-                min = DefaultMin;
-                max = DefaultMax;
-
-                if (values != null)
+                if (values == null || values.Count == 0)
                 {
-                    for (int i = 0; i < values.Count; i++)
-                    {
-                        min = Mathf.Min(min, values[i]);
-                        max = Mathf.Max(max, values[i]);
-                    }
-                }
-
-                if (Mathf.Approximately(min, max))
-                {
-                    float padding = Mathf.Max(Mathf.Abs(min) * 0.05f, 1f);
-                    min -= padding;
-                    max += padding;
+                    min = DefaultMin;
+                    max = DefaultMax;
                     return;
                 }
 
-                float range = max - min;
-                float edgePadding = Mathf.Max(range * 0.04f, 0.001f);
-                if (min < DefaultMin)
+                min = values[0];
+                max = values[0];
+                for (int i = 1; i < values.Count; i++)
                 {
-                    min -= edgePadding;
+                    min = Mathf.Min(min, values[i]);
+                    max = Mathf.Max(max, values[i]);
                 }
 
-                if (max > DefaultMax)
+                float defaultRange = Mathf.Max(DefaultMax - DefaultMin, 1f);
+                float minVisibleRange = defaultRange * 0.18f;
+                float center = (min + max) * 0.5f;
+                float range = max - min;
+                if (range < minVisibleRange)
                 {
-                    max += edgePadding;
+                    min = center - minVisibleRange * 0.5f;
+                    max = center + minVisibleRange * 0.5f;
+                    range = max - min;
+                }
+
+                float edgePadding = Mathf.Max(range * 0.08f, 0.001f);
+                min -= edgePadding;
+                max += edgePadding;
+
+                if (DefaultMin >= 0f)
+                {
+                    min = Mathf.Max(DefaultMin, min);
+                }
+
+                if (max <= min)
+                {
+                    max = min + minVisibleRange;
                 }
             }
         }
@@ -2305,6 +2469,9 @@ namespace SCADASim.UI
             private readonly Label primaryMinLabel;
             private readonly Label secondaryMaxLabel;
             private readonly Label secondaryMinLabel;
+            private readonly Label primaryCurrentLabel;
+            private readonly Label secondaryCurrentLabel;
+            private readonly Label statusLabel;
 
             public TrendGraphElement(
                 Color primaryColor,
@@ -2322,6 +2489,9 @@ namespace SCADASim.UI
                 primaryMinLabel = CreateGraphLabel("graph-label-primary-min", primaryColor);
                 secondaryMaxLabel = CreateGraphLabel("graph-label-secondary-max", secondaryColor);
                 secondaryMinLabel = CreateGraphLabel("graph-label-secondary-min", secondaryColor);
+                primaryCurrentLabel = CreateGraphLabel("graph-label-primary-current", primaryColor);
+                secondaryCurrentLabel = CreateGraphLabel("graph-label-secondary-current", secondaryColor);
+                statusLabel = CreateGraphLabel("graph-label-status", GraphBlack);
                 CreateAxisTitle(primaryScale.Title, "graph-axis-title-left", primaryColor);
                 CreateAxisTitle(secondaryScale.Title, "graph-axis-title-right", secondaryColor);
                 CreateAxisTitle("Последние 27 с", "graph-axis-title-bottom", GraphBlack);
@@ -2365,6 +2535,9 @@ namespace SCADASim.UI
             {
                 UpdateLabelRange(primary, primaryScale, primaryMaxLabel, primaryMinLabel);
                 UpdateLabelRange(secondary, secondaryScale, secondaryMaxLabel, secondaryMinLabel);
+                primaryCurrentLabel.text = FormatCurrent(primary, primaryScale);
+                secondaryCurrentLabel.text = FormatCurrent(secondary, secondaryScale);
+                statusLabel.text = BuildStatus(primary, primaryScale);
             }
 
             private static void UpdateLabelRange(List<float> values, GraphAxisScale scale, Label maxLabel, Label minLabel)
@@ -2379,6 +2552,80 @@ namespace SCADASim.UI
                 if (Mathf.Abs(val) >= 100f) return val.ToString("0");
                 if (Mathf.Abs(val) >= 10f) return val.ToString("0.#");
                 return val.ToString("0.##");
+            }
+
+            private static string FormatCurrent(List<float> values, GraphAxisScale scale)
+            {
+                if (values.Count == 0)
+                {
+                    return string.Empty;
+                }
+
+                float current = values[values.Count - 1];
+                return $"{FormatValue(current)} {TrendLabel(values)}";
+            }
+
+            private static string TrendLabel(List<float> values)
+            {
+                if (values.Count < 10)
+                {
+                    return "стаб.";
+                }
+
+                float recent = AverageTail(values, 8);
+                float earlier = AverageRange(values, Mathf.Max(0, values.Count - 24), Mathf.Max(0, values.Count - 12));
+                float delta = recent - earlier;
+                float reference = Mathf.Max(1f, Mathf.Abs(earlier));
+                if (Mathf.Abs(delta) / reference < 0.025f)
+                {
+                    return "стаб.";
+                }
+
+                return delta > 0f ? "рост" : "сниж.";
+            }
+
+            private static string BuildStatus(List<float> values, GraphAxisScale scale)
+            {
+                if (!scale.HasSafeRange || values.Count == 0)
+                {
+                    return "ТРЕНД";
+                }
+
+                float current = values[values.Count - 1];
+                if (current < scale.SafeMin)
+                {
+                    return $"НИЖЕ ОКНА {FormatValue(scale.SafeMin)}";
+                }
+
+                if (current > scale.SafeMax)
+                {
+                    return $"ВЫШЕ ОКНА {FormatValue(scale.SafeMax)}";
+                }
+
+                return $"ОКНО {FormatValue(scale.SafeMin)}-{FormatValue(scale.SafeMax)}";
+            }
+
+            private static float AverageTail(List<float> values, int count)
+            {
+                return AverageRange(values, Mathf.Max(0, values.Count - count), values.Count);
+            }
+
+            private static float AverageRange(List<float> values, int startInclusive, int endExclusive)
+            {
+                int start = Mathf.Clamp(startInclusive, 0, values.Count);
+                int end = Mathf.Clamp(endExclusive, start, values.Count);
+                if (end <= start)
+                {
+                    return values.Count > 0 ? values[values.Count - 1] : 0f;
+                }
+
+                float sum = 0f;
+                for (int i = start; i < end; i++)
+                {
+                    sum += values[i];
+                }
+
+                return sum / (end - start);
             }
 
             private static void PushValue(List<float> values, float value)
@@ -2400,9 +2647,12 @@ namespace SCADASim.UI
 
                 Rect plotRect = GetPlotRect(rect);
                 Painter2D painter = context.painter2D;
+                DrawSafeBand(painter, plotRect, primary, primaryScale);
                 DrawGrid(painter, plotRect);
-                DrawSeries(painter, plotRect, secondary, secondaryColor, 1.5f, secondaryScale);
-                DrawSeries(painter, plotRect, primary, primaryColor, 2.5f, primaryScale);
+                DrawZeroLine(painter, plotRect, primary, primaryScale);
+                DrawZeroLine(painter, plotRect, secondary, secondaryScale);
+                DrawSeries(painter, plotRect, secondary, secondaryColor, 2.0f, secondaryScale);
+                DrawSeries(painter, plotRect, primary, primaryColor, 3.4f, primaryScale);
             }
 
             private static Rect GetPlotRect(Rect rect)
@@ -2451,6 +2701,43 @@ namespace SCADASim.UI
                 painter.Stroke();
             }
 
+            private static void DrawSafeBand(Painter2D painter, Rect rect, List<float> values, GraphAxisScale scale)
+            {
+                if (!scale.HasSafeRange)
+                {
+                    return;
+                }
+
+                scale.GetRange(values, out float min, out float max);
+                float yTop = Mathf.Lerp(rect.yMax, rect.yMin, Mathf.Clamp01(Mathf.InverseLerp(min, max, scale.SafeMax)));
+                float yBottom = Mathf.Lerp(rect.yMax, rect.yMin, Mathf.Clamp01(Mathf.InverseLerp(min, max, scale.SafeMin)));
+                painter.fillColor = new Color(0.13f, 0.55f, 0.32f, 0.07f);
+                painter.BeginPath();
+                painter.MoveTo(new Vector2(rect.xMin, yTop));
+                painter.LineTo(new Vector2(rect.xMax, yTop));
+                painter.LineTo(new Vector2(rect.xMax, yBottom));
+                painter.LineTo(new Vector2(rect.xMin, yBottom));
+                painter.ClosePath();
+                painter.Fill();
+            }
+
+            private static void DrawZeroLine(Painter2D painter, Rect rect, List<float> values, GraphAxisScale scale)
+            {
+                scale.GetRange(values, out float min, out float max);
+                if (min > 0f || max < 0f)
+                {
+                    return;
+                }
+
+                float y = Mathf.Lerp(rect.yMax, rect.yMin, Mathf.InverseLerp(min, max, 0f));
+                painter.lineWidth = 1.5f;
+                painter.strokeColor = new Color(0.05f, 0.05f, 0.05f, 0.45f);
+                painter.BeginPath();
+                painter.MoveTo(new Vector2(rect.xMin, y));
+                painter.LineTo(new Vector2(rect.xMax, y));
+                painter.Stroke();
+            }
+
             private static void DrawSeries(
                 Painter2D painter,
                 Rect rect,
@@ -2468,13 +2755,17 @@ namespace SCADASim.UI
                 painter.lineWidth = width;
                 painter.strokeColor = color;
                 painter.BeginPath();
+                float smoothed = values[0];
+                Vector2 lastPoint = Vector2.zero;
 
                 for (int i = 0; i < values.Count; i++)
                 {
+                    smoothed = i == 0 ? values[i] : Mathf.Lerp(smoothed, values[i], 0.32f);
                     float x = Mathf.Lerp(rect.xMin, rect.xMax, i / (float)Mathf.Max(1, values.Count - 1));
-                    float normalized = Mathf.Clamp01(Mathf.InverseLerp(min, max, values[i]));
+                    float normalized = Mathf.Clamp01(Mathf.InverseLerp(min, max, smoothed));
                     float y = Mathf.Lerp(rect.yMax, rect.yMin, normalized);
                     Vector2 point = new Vector2(x, y);
+                    lastPoint = point;
 
                     if (i == 0)
                     {
@@ -2487,6 +2778,29 @@ namespace SCADASim.UI
                 }
 
                 painter.Stroke();
+                DrawDot(painter, lastPoint, width + 2.5f, color);
+            }
+
+            private static void DrawDot(Painter2D painter, Vector2 center, float radius, Color color)
+            {
+                painter.fillColor = color;
+                painter.BeginPath();
+                for (int i = 0; i < 18; i++)
+                {
+                    float angle = i / 18f * Mathf.PI * 2f;
+                    Vector2 point = center + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius;
+                    if (i == 0)
+                    {
+                        painter.MoveTo(point);
+                    }
+                    else
+                    {
+                        painter.LineTo(point);
+                    }
+                }
+
+                painter.ClosePath();
+                painter.Fill();
             }
         }
 
