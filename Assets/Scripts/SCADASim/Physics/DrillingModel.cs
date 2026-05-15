@@ -31,6 +31,7 @@ namespace SCADASim.Physics
         private float nextIncidentCheckTime;
         private float lastIncidentTime = -999f;
         private float nextSupervisorTaskTime = 2f;
+        private float supervisorCadenceMultiplier = 1f;
         private bool hasActiveSupervisorTask;
         private SupervisorTask activeSupervisorTask;
         private float activeSupervisorTaskStartedAt;
@@ -99,6 +100,11 @@ namespace SCADASim.Physics
         public void SetSimulationSpeedMultiplier(float multiplier)
         {
             simulationSpeedMultiplier = Mathf.Clamp(multiplier, 0.25f, 20f);
+        }
+
+        public void SetSupervisorCadenceMultiplier(float multiplier)
+        {
+            supervisorCadenceMultiplier = Mathf.Clamp(multiplier, 0.55f, 1.8f);
         }
 
         public void SetCrewManager(CrewManager crew)
@@ -238,6 +244,7 @@ namespace SCADASim.Physics
             }
 
             supervisorClockSeconds += Time.deltaTime * simulationSpeedMultiplier;
+            crewManager?.AdvanceShiftTime(Time.deltaTime * simulationSpeedMultiplier);
             SimulateStep(Time.deltaTime * simulationSpeed * simulationSpeedMultiplier);
         }
 
@@ -281,6 +288,8 @@ namespace SCADASim.Physics
             float oldRpm = state.Rpm;
             float oldWob = state.WeightOnBitTonnes;
             float oldFlow = state.FlowRateLps;
+            float oldMudWeight = state.MudWeightSG;
+            float oldChoke = state.ChokeOpening01;
 
             switch (command.Type)
             {
@@ -314,6 +323,8 @@ namespace SCADASim.Physics
             commandRampEnergy += Mathf.Abs(state.Rpm - oldRpm) / 80f;
             commandRampEnergy += Mathf.Abs(state.WeightOnBitTonnes - oldWob) / 10f;
             commandRampEnergy += Mathf.Abs(state.FlowRateLps - oldFlow) / 35f;
+            commandRampEnergy += Mathf.Abs(state.MudWeightSG - oldMudWeight) / 0.08f;
+            commandRampEnergy += Mathf.Abs(state.ChokeOpening01 - oldChoke) / 0.35f;
         }
 
         private void SimulateStep(float deltaTime)
@@ -333,14 +344,14 @@ namespace SCADASim.Physics
             state.TrueVerticalDepth = Mathf.Max(0f, -trajectory.Position.y);
 
             state.DragTonnes = CalculateDrag(zone, trajectory, crew);
-            state.SurfaceTorqueKnM = CalculateTorque(zone, trajectory);
             state.CuttingsTransportEfficiency01 = CalculateCuttingsTransport(zone, trajectory, crew);
+            state.Vibration = CalculateVibration(zone, trajectory, crew);
+            state.SurfaceTorqueKnM = CalculateTorque(zone, trajectory);
             state.StandpipePressureBar = CalculateStandpipePressure(zone, trajectory);
             CalculatePressureWindow(zone, trajectory);
             state.LostCirculationRisk01 = CalculateLostCirculationRisk(zone);
             state.KickRisk01 = CalculateKickRisk(zone, crew);
             state.FlowOutLps = CalculateReturnFlow();
-            state.Vibration = CalculateVibration(zone, trajectory, crew);
             state.RopMPerHour = CalculateRop(zone, trajectory, crew);
             state.HookLoadTonnes = physicsConfig.BaseHookLoadTonnes + state.DragTonnes * 0.65f;
             state.StuckPipeRisk01 = CalculateStuckPipeRisk(zone, trajectory, crew);
@@ -430,6 +441,8 @@ namespace SCADASim.Physics
         private float CalculateTorque(LithologyZone zone, TrajectorySample trajectory)
         {
             float rockTorque = zone.RockStrengthMpa * 0.055f * Mathf.InverseLerp(1f, 28f, state.WeightOnBitTonnes);
+            float rpmTorque = Mathf.InverseLerp(35f, 190f, state.Rpm) * 3.2f;
+            float overloadTorque = Mathf.InverseLerp(14f, 28f, state.WeightOnBitTonnes) * 4.8f;
             float trajectoryTorque = state.DragTonnes *
                                      (0.1f + Mathf.Sin(trajectory.InclinationDegrees * Mathf.Deg2Rad) * 0.18f) *
                                      (1f + trajectory.DoglegSeverityDegPer30m * physicsConfig.DoglegTorqueGain);
@@ -439,11 +452,13 @@ namespace SCADASim.Physics
 
             return physicsConfig.BaseBitTorqueKnM +
                    rockTorque +
+                   rpmTorque +
+                   overloadTorque +
                    trajectoryTorque +
                    bitWearTorque +
                    stickSlipOscillation +
                    measurementNoise +
-                   commandRampEnergy * 1.8f;
+                   commandRampEnergy * 2.4f;
         }
 
         private float CalculateStandpipePressure(LithologyZone zone, TrajectorySample trajectory)
@@ -456,10 +471,11 @@ namespace SCADASim.Physics
             float lithologyRestriction = zone.Stickiness01 * 7f + zone.Instability01 * 5f;
             float packOff = state.StuckPipeRisk01 * physicsConfig.PressureTrendRiskGain * 100f;
             float chokeBackPressure = Mathf.Pow(1f - state.ChokeOpening01, 1.7f) * 22f;
+            float rampPulse = commandRampEnergy * Mathf.Lerp(1.5f, 4.5f, flowRatio);
             float pumpPulse = Mathf.Sin(Time.time * 3.8f) * Mathf.Lerp(0.3f, 1.2f, flowRatio);
             float formationNoise = (Mathf.PerlinNoise(Time.time * 0.22f, state.MeasuredDepth * 0.006f) - 0.5f) * 2.4f;
 
-            return physicsConfig.BaseStandpipePressureBar + flowPressure + cuttingsLoading + lithologyRestriction + packOff + chokeBackPressure + pumpPulse + formationNoise;
+            return physicsConfig.BaseStandpipePressureBar + flowPressure + cuttingsLoading + lithologyRestriction + packOff + chokeBackPressure + rampPulse + pumpPulse + formationNoise;
         }
 
         private float CalculateCuttingsTransport(LithologyZone zone, TrajectorySample trajectory, CrewInfluence crew)
@@ -520,19 +536,21 @@ namespace SCADASim.Physics
                 zone.Stickiness01 * 0.26f +
                 Mathf.InverseLerp(0.35f, 0.9f, 1f - state.CuttingsTransportEfficiency01) * 0.22f +
                 crew.Fatigue * 0.18f +
-                commandRampEnergy * 0.08f);
+                commandRampEnergy * 0.14f);
 
             float lateral = Mathf.Clamp01(
                 zone.Abrasiveness01 * 0.3f +
                 dogleg01 * 0.35f +
                 rpm01 * 0.25f +
                 state.BitWear01 * 0.2f +
+                commandRampEnergy * 0.07f +
                 Mathf.PerlinNoise(t * 0.4f, state.MeasuredDepth * 0.01f) * 0.12f);
 
             float axial = Mathf.Clamp01(
                 zone.RockStrengthMpa / 120f * 0.35f +
                 wob01 * 0.45f +
                 state.BitWear01 * 0.18f +
+                commandRampEnergy * 0.05f +
                 Mathf.PerlinNoise(t * 0.8f, state.MeasuredDepth * 0.02f) * 0.1f);
 
             return new VibrationState
@@ -656,7 +674,7 @@ namespace SCADASim.Physics
                     AlertSeverity.Critical,
                     "Приток флюида",
                     "Расход на выходе выше входа, газопоказания растут, забойное давление ниже пластового.",
-                    "Немедленно стабилизировать скважину: прикрыть штуцер, поднять плотность раствора, остановить наращивание параметров. НПВ +18 мин.",
+                    "Немедленно стабилизировать скважину: прикрыть штуцер, поднять плотность раствора, остановить наращивание параметров. Простои +18 мин.",
                     current.MeasuredDepth));
                 return;
             }
@@ -668,8 +686,8 @@ namespace SCADASim.Physics
                     OperationalIncidentType.LostCirculation,
                     AlertSeverity.Critical,
                     "Поглощение раствора",
-                    "Выходной расход ниже входного, ECD приближается к давлению гидроразрыва пласта.",
-                    "Снизить расход, контролировать объем в емкостях, подготовить LCM-пачку. НПВ +18 мин.",
+                    "Выходной расход ниже входного, эквивалентная плотность приближается к давлению гидроразрыва пласта.",
+                    "Снизить расход, контролировать объем в емкостях, подготовить материал от поглощения. Простои +18 мин.",
                     current.MeasuredDepth));
                 return;
             }
@@ -680,8 +698,8 @@ namespace SCADASim.Physics
                     OperationalIncidentType.DifferentialSticking,
                     AlertSeverity.Warning,
                     "Риск дифференциального прихвата",
-                    "Высокая перегрузка по давлению, повышенный drag и слабая очистка в наклонном участке.",
-                    "Освободить колонну: снизить нагрузку на долото, увеличить циркуляцию, не оставлять колонну без движения. НПВ +6 мин.",
+                    "Высокая перегрузка по давлению, повышенное сопротивление движению и слабая очистка в наклонном участке.",
+                    "Освободить колонну: снизить нагрузку на долото, увеличить циркуляцию, не оставлять колонну без движения. Простои +6 мин.",
                     current.MeasuredDepth));
                 return;
             }
@@ -693,7 +711,7 @@ namespace SCADASim.Physics
                     AlertSeverity.Warning,
                     "Недостаточный вынос шлама",
                     "В горизонтальном или наклонном интервале формируется шламовая постель.",
-                    "Снизить ROP, увеличить расход на 100-200 л/мин и провести промывку до стабилизации давления. НПВ +6 мин.",
+                    "Снизить скорость проходки, увеличить расход на 100-200 л/мин и провести промывку до стабилизации давления. Простои +6 мин.",
                     current.MeasuredDepth));
                 return;
             }
@@ -705,7 +723,7 @@ namespace SCADASim.Physics
                     AlertSeverity.Warning,
                     "Предельный износ долота",
                     "Рост момента и осевой вибрации указывает на снижение режущей способности.",
-                    "Запланировать подъем и смену долота. Продолжение бурения резко снижает ROP и повышает аварийность. НПВ +6 мин.",
+                    "Запланировать подъем и смену долота. Продолжение бурения резко снижает скорость проходки и повышает аварийность. Простои +6 мин.",
                     current.MeasuredDepth));
             }
         }
@@ -760,13 +778,13 @@ namespace SCADASim.Physics
             if (succeeded)
             {
                 successfulSupervisorTasks++;
-                nextSupervisorTaskTime = supervisorClockSeconds + 18f;
+                nextSupervisorTaskTime = supervisorClockSeconds + Mathf.Max(4f, 18f * supervisorCadenceMultiplier);
             }
             else
             {
                 failedSupervisorTasks++;
                 ApplySupervisorFailurePenalty(activeSupervisorTask.Type);
-                nextSupervisorTaskTime = supervisorClockSeconds + 8f;
+                nextSupervisorTaskTime = supervisorClockSeconds + Mathf.Max(3f, 8f * supervisorCadenceMultiplier);
             }
 
             SupervisorTaskResult result = new SupervisorTaskResult(
@@ -795,6 +813,9 @@ namespace SCADASim.Physics
             float vibrationG = current.Vibration.LowFrequencyEnergy * 3.5f;
             bool pressureWindowSafe = current.BottomHolePressureMPa > current.PorePressureMPa + 0.15f &&
                                       current.BottomHolePressureMPa < current.FracturePressureMPa - 0.25f;
+            float pressureMarginLow = current.BottomHolePressureMPa - current.PorePressureMPa;
+            float pressureMarginHigh = current.FracturePressureMPa - current.BottomHolePressureMPa;
+            CrewInfluence crew = GetCrewInfluenceOrDefault();
 
             switch (task.Type)
             {
@@ -805,8 +826,8 @@ namespace SCADASim.Physics
                               current.BottomHolePressureMPa > current.PorePressureMPa + 0.25f &&
                               pressureWindowSafe;
                     summary = ok
-                        ? $"Приток задавлен: выход {flowBalancePercent:+0.0;-0.0;0.0}%, газ {current.GasUnitsPercent:0.0}%, BHP выше пластового."
-                        : $"Не выполнено: выход {flowBalancePercent:+0.0;-0.0;0.0}%, газ {current.GasUnitsPercent:0.0}%, BHP/пластовое {current.BottomHolePressureMPa:0.0}/{current.PorePressureMPa:0.0} МПа.";
+                        ? $"Приток стабилизирован: баланс выхода {flowBalancePercent:+0.0;-0.0;0.0}%, газ {current.GasUnitsPercent:0.0}%, забойное давление выше пластового."
+                        : $"Не выполнено: баланс выхода {flowBalancePercent:+0.0;-0.0;0.0}%, газ {current.GasUnitsPercent:0.0}%, забойное/пластовое {current.BottomHolePressureMPa:0.0}/{current.PorePressureMPa:0.0} МПа.";
                     return ok;
                 }
 
@@ -815,8 +836,8 @@ namespace SCADASim.Physics
                     float sppRise = current.StandpipePressureBar - task.BaselineStandpipePressureBar;
                     bool ok = flowBalancePercent >= -5f && sppRise < 12f && current.LostCirculationRisk01 < 0.42f;
                     summary = ok
-                        ? $"Поглощение стабилизировано: выход {flowBalancePercent:+0.0;-0.0;0.0}%, SPP +{sppRise:0.0} бар."
-                        : $"Не выполнено: выход {flowBalancePercent:+0.0;-0.0;0.0}%, SPP +{sppRise:0.0} бар, риск {current.LostCirculationRisk01 * 100f:0}%.";
+                        ? $"Поглощение стабилизировано: баланс выхода {flowBalancePercent:+0.0;-0.0;0.0}%, давление насоса +{sppRise:0.0} бар."
+                        : $"Не выполнено: баланс выхода {flowBalancePercent:+0.0;-0.0;0.0}%, давление насоса +{sppRise:0.0} бар, риск {current.LostCirculationRisk01 * 100f:0}%.";
                     return ok;
                 }
 
@@ -824,8 +845,8 @@ namespace SCADASim.Physics
                 {
                     bool ok = current.DragTonnes < 35f && current.CuttingsTransportEfficiency01 > 0.65f && current.StuckPipeRisk01 < 0.58f;
                     summary = ok
-                        ? $"Направленный участок под контролем: drag {current.DragTonnes:0.0} т, очистка {current.CuttingsTransportEfficiency01 * 100f:0}%."
-                        : $"Не выполнено: drag {current.DragTonnes:0.0} т, очистка {current.CuttingsTransportEfficiency01 * 100f:0}%, риск прихвата {current.StuckPipeRisk01 * 100f:0}%.";
+                        ? $"Направленный участок под контролем: сопротивление движению {current.DragTonnes:0.0} т, очистка {current.CuttingsTransportEfficiency01 * 100f:0}%."
+                        : $"Не выполнено: сопротивление движению {current.DragTonnes:0.0} т, очистка {current.CuttingsTransportEfficiency01 * 100f:0}%, риск прихвата {current.StuckPipeRisk01 * 100f:0}%.";
                     return ok;
                 }
 
@@ -834,8 +855,8 @@ namespace SCADASim.Physics
                     float sppRise = current.StandpipePressureBar - task.BaselineStandpipePressureBar;
                     bool ok = current.CuttingsTransportEfficiency01 > 0.7f && sppRise < 12f && vibrationG < 2.2f;
                     summary = ok
-                        ? $"Промывка эффективна: очистка {current.CuttingsTransportEfficiency01 * 100f:0}%, SPP +{sppRise:0.0} бар."
-                        : $"Не выполнено: очистка {current.CuttingsTransportEfficiency01 * 100f:0}%, SPP +{sppRise:0.0} бар, вибрация {vibrationG:0.0} g.";
+                        ? $"Промывка эффективна: очистка {current.CuttingsTransportEfficiency01 * 100f:0}%, давление насоса +{sppRise:0.0} бар."
+                        : $"Не выполнено: очистка {current.CuttingsTransportEfficiency01 * 100f:0}%, давление насоса +{sppRise:0.0} бар, вибрация {vibrationG:0.0} g.";
                     return ok;
                 }
 
@@ -845,8 +866,8 @@ namespace SCADASim.Physics
                               current.BoreholeInstabilityRisk01 < 0.55f &&
                               Mathf.Abs(flowBalancePercent) < 5f;
                     summary = ok
-                        ? $"Глинистый интервал пройден стабильно: ECD {current.EquivalentCirculatingDensitySG:0.00}, осыпь {current.BoreholeInstabilityRisk01 * 100f:0}%."
-                        : $"Не выполнено: ECD {current.EquivalentCirculatingDensitySG:0.00}, осыпь {current.BoreholeInstabilityRisk01 * 100f:0}%, баланс {flowBalancePercent:+0.0;-0.0;0.0}%.";
+                        ? $"Глинистый интервал пройден стабильно: эквив. плотность {current.EquivalentCirculatingDensitySG:0.00}, осыпь {current.BoreholeInstabilityRisk01 * 100f:0}%."
+                        : $"Не выполнено: эквив. плотность {current.EquivalentCirculatingDensitySG:0.00}, осыпь {current.BoreholeInstabilityRisk01 * 100f:0}%, баланс {flowBalancePercent:+0.0;-0.0;0.0}%.";
                     return ok;
                 }
 
@@ -857,8 +878,43 @@ namespace SCADASim.Physics
                         : 0f;
                     bool ok = vibrationG < 2.2f && torqueRisePercent < 20f && current.RopMPerHour >= 8f;
                     summary = ok
-                        ? $"Долото сохранено: вибрация {vibrationG:0.0} g, момент {torqueRisePercent:+0;-0;0}% к базовому, ROP {current.RopMPerHour:0.0} м/ч."
-                        : $"Не выполнено: вибрация {vibrationG:0.0} g, момент {torqueRisePercent:+0;-0;0}%, ROP {current.RopMPerHour:0.0} м/ч.";
+                        ? $"Долото сохранено: вибрация {vibrationG:0.0} g, момент {torqueRisePercent:+0;-0;0}% к базовому, скорость {current.RopMPerHour:0.0} м/ч."
+                        : $"Не выполнено: вибрация {vibrationG:0.0} g, момент {torqueRisePercent:+0;-0;0}%, скорость {current.RopMPerHour:0.0} м/ч.";
+                    return ok;
+                }
+
+                case SupervisorTaskType.PressureWindow:
+                {
+                    bool ok = pressureMarginLow > 0.25f &&
+                              pressureMarginHigh > 0.45f &&
+                              Mathf.Abs(flowBalancePercent) < 4f;
+                    summary = ok
+                        ? $"Окно давлений удержано: запас к пластовому {pressureMarginLow:0.0} МПа, запас до гидроразрыва {pressureMarginHigh:0.0} МПа."
+                        : $"Не выполнено: запас к пластовому {pressureMarginLow:0.0} МПа, до гидроразрыва {pressureMarginHigh:0.0} МПа, баланс {flowBalancePercent:+0.0;-0.0;0.0}%.";
+                    return ok;
+                }
+
+                case SupervisorTaskType.CrewHandover:
+                {
+                    bool ok = crew.Fatigue < 0.58f &&
+                              crew.ProcedureDiscipline01 > 0.55f &&
+                              crew.ShiftCoordination01 > 0.55f;
+                    summary = ok
+                        ? $"Пересменка подготовлена: усталость {crew.Fatigue * 100f:0}%, дисциплина {crew.ProcedureDiscipline01 * 100f:0}%, координация {crew.ShiftCoordination01 * 100f:0}%."
+                        : $"Не выполнено: усталость {crew.Fatigue * 100f:0}%, дисциплина {crew.ProcedureDiscipline01 * 100f:0}%, координация {crew.ShiftCoordination01 * 100f:0}%.";
+                    return ok;
+                }
+
+                case SupervisorTaskType.PumpEfficiency:
+                {
+                    float sppRise = current.StandpipePressureBar - task.BaselineStandpipePressureBar;
+                    bool ok = current.CuttingsTransportEfficiency01 > 0.64f &&
+                              sppRise < 18f &&
+                              Mathf.Abs(flowBalancePercent) < 6f &&
+                              vibrationG < 2.4f;
+                    summary = ok
+                        ? $"Насосный режим эффективен: очистка {current.CuttingsTransportEfficiency01 * 100f:0}%, давление насоса +{sppRise:0.0} бар."
+                        : $"Не выполнено: очистка {current.CuttingsTransportEfficiency01 * 100f:0}%, давление насоса +{sppRise:0.0} бар, баланс {flowBalancePercent:+0.0;-0.0;0.0}%.";
                     return ok;
                 }
 
@@ -869,8 +925,8 @@ namespace SCADASim.Physics
                               current.BitWear01 < 0.75f &&
                               pressureWindowSafe;
                     summary = ok
-                        ? $"План смены выдержан: ROP {current.RopMPerHour:0.0} м/ч, вибрация {vibrationG:0.0} g, износ {current.BitWear01 * 100f:0}%."
-                        : $"Не выполнено: ROP {current.RopMPerHour:0.0} м/ч, вибрация {vibrationG:0.0} g, износ {current.BitWear01 * 100f:0}%, окно давлений {(pressureWindowSafe ? "OK" : "нет")}.";
+                        ? $"План смены выдержан: скорость {current.RopMPerHour:0.0} м/ч, вибрация {vibrationG:0.0} g, износ {current.BitWear01 * 100f:0}%."
+                        : $"Не выполнено: скорость {current.RopMPerHour:0.0} м/ч, вибрация {vibrationG:0.0} g, износ {current.BitWear01 * 100f:0}%, окно давлений {(pressureWindowSafe ? "в норме" : "нарушено")}.";
                     return ok;
                 }
             }
@@ -905,21 +961,40 @@ namespace SCADASim.Physics
                     state.BitWear01 = Mathf.Clamp01(state.BitWear01 + 0.04f);
                     commandRampEnergy = Mathf.Clamp01(commandRampEnergy + 0.1f);
                     break;
+
+                case SupervisorTaskType.PressureWindow:
+                    gasInfluxBias = Mathf.Clamp01(gasInfluxBias + 0.06f);
+                    lostCirculationBias = Mathf.Clamp01(lostCirculationBias + 0.06f);
+                    state.NonProductiveTimeMinutes += 4f;
+                    break;
+
+                case SupervisorTaskType.CrewHandover:
+                    crewManager?.ApplyFatiguePenalty(0.08f, 0.05f);
+                    state.NonProductiveTimeMinutes += 3f;
+                    break;
+
+                case SupervisorTaskType.PumpEfficiency:
+                    bitBallingRiskBias = Mathf.Clamp01(bitBallingRiskBias + 0.08f);
+                    commandRampEnergy = Mathf.Clamp01(commandRampEnergy + 0.08f);
+                    break;
             }
         }
 
         private SupervisorTask BuildSupervisorTask(DrillingState current, int sequence)
         {
-            int variant = sequence % 7;
+            int variant = sequence % 10;
+            CrewInfluence crew = GetCrewInfluenceOrDefault();
+            float pressureMarginLow = current.BottomHolePressureMPa - current.PorePressureMPa;
+            float pressureMarginHigh = current.FracturePressureMPa - current.BottomHolePressureMPa;
             if (current.KickRisk01 > 0.42f || variant == 5)
             {
                 return new SupervisorTask(
                     SupervisorTaskType.KickControl,
                     "Контроль притока",
-                    "Признаки притока: выход и газ растут. Нужно вернуть скважину в overbalance без выхода за ГРП.",
-                    "Успех: выход <= вход +3%, газ <6%, забойное давление выше пластового и ниже ГРП.",
-                    "Смотреть: расход вход/выход, газ %, BHP, пластовое, ГРП, ECD.",
-                    "Крутилки: прикрыть штуцер, поднять плотность раствора ступенью 0.02-0.05 SG, не разгонять RPM/WOB.",
+                    "Признаки притока: выход и газ растут. Нужно вернуть скважину к безопасному превышению забойного давления над пластовым без выхода к гидроразрыву.",
+                    "Успех: выход не выше входа более чем на 3%, газ <6%, забойное давление выше пластового и ниже гидроразрыва.",
+                    "Смотреть: расход вход/выход, газ, забойное и пластовое давление, эквивалентную плотность.",
+                    "Крутилки: прикрыть штуцер, поднять плотность раствора на 0.02-0.05 SG, не разгонять обороты и нагрузку.",
                     8f,
                     55f,
                     140,
@@ -933,8 +1008,8 @@ namespace SCADASim.Physics
                     SupervisorTaskType.LossControl,
                     "Контроль поглощения",
                     "Емкости проседают: слабый пласт принимает раствор. Нужно снизить динамическую нагрузку на пласт.",
-                    "Успех: выход не ниже входа более чем на 5%, SPP не вырос больше чем на 12 бар, риск поглощения <42%.",
-                    "Смотреть: расход выход, давление насоса, ECD, риск поглощения.",
+                    "Успех: выход не ниже входа более чем на 5%, давление насоса не выросло больше чем на 12 бар, риск поглощения <42%.",
+                    "Смотреть: расход на выходе, давление насоса, эквивалентную плотность, риск поглощения.",
                     "Крутилки: снизить расход на 100-250 л/мин, открыть штуцер, не поднимать плотность.",
                     9f,
                     55f,
@@ -948,10 +1023,10 @@ namespace SCADASim.Physics
                 return new SupervisorTask(
                     SupervisorTaskType.DirectionalDrag,
                     "Задание бурового мастера",
-                    "В направленном участке растут torque/drag. Нужно удержать механику без перехода к прихвату.",
-                    "Успех: drag <35 т, вынос шлама >65%, риск прихвата <58%.",
-                    "Смотреть: момент, drag/нагрузка, зенит, вынос шлама, риск прихвата.",
-                    "Крутилки: не завышать WOB, держать расход достаточным, при вибрации снижать RPM.",
+                    "В направленном участке растут момент и сопротивление движению колонны. Нужно удержать механику без перехода к прихвату.",
+                    "Успех: сопротивление движению <35 т, вынос шлама >65%, риск прихвата <58%.",
+                    "Смотреть: момент, нагрузку, зенитный угол, вынос шлама, риск прихвата.",
+                    "Крутилки: не завышать нагрузку на долото, держать расход достаточным, при вибрации снижать обороты.",
                     10f,
                     60f,
                     160,
@@ -965,9 +1040,9 @@ namespace SCADASim.Physics
                     SupervisorTaskType.HoleCleaning,
                     "Промывка ствола",
                     "Шламовая постель мешает бурению. Нужно поднять очистку, не спровоцировав рост давления.",
-                    "Успех: вынос шлама >70%, SPP +12 бар максимум, вибрация <2.2 g.",
-                    "Смотреть: вынос шлама, SPP, вибрация, расход выход.",
-                    "Крутилки: плавно поднять расход, снизить WOB/ROP, выполнить промывку ствола бригадой.",
+                    "Успех: вынос шлама >70%, давление насоса +12 бар максимум, вибрация <2.2 g.",
+                    "Смотреть: вынос шлама, давление насоса, вибрацию, расход на выходе.",
+                    "Крутилки: плавно поднять расход, снизить нагрузку и скорость проходки, выполнить промывку ствола бригадой.",
                     7f,
                     45f,
                     120,
@@ -981,8 +1056,8 @@ namespace SCADASim.Physics
                     SupervisorTaskType.ShaleStability,
                     "Запрос геолога",
                     "Глинистый интервал чувствителен к давлению и расходу. Нужно пройти без осыпи стенок.",
-                    "Успех: ECD в безопасном окне, риск осыпи <55%, баланс расхода в пределах 5%.",
-                    "Смотреть: ECD, BHP/пластовое/ГРП, риск осыпи, расход вход/выход.",
+                    "Успех: эквивалентная плотность в безопасном окне, риск осыпи <55%, баланс расхода в пределах 5%.",
+                    "Смотреть: эквивалентную плотность, забойное/пластовое давление, гидроразрыв, риск осыпи, расход вход/выход.",
                     "Крутилки: держать плотность и штуцер без резких скачков, расход менять малыми шагами.",
                     9f,
                     60f,
@@ -996,10 +1071,10 @@ namespace SCADASim.Physics
                 return new SupervisorTask(
                     SupervisorTaskType.BitAssessment,
                     "Оценка долота",
-                    "Долото теряет эффективность. Нужно сохранить ROP без разрушительной вибрации.",
-                    "Успех: вибрация <2.2 g, момент не вырос выше +20%, ROP >=8 м/ч.",
-                    "Смотреть: вибрация, момент, ROP, износ долота.",
-                    "Крутилки: снизить WOB/RPM до устойчивого режима, не давить долото насильно.",
+                    "Долото теряет эффективность. Нужно сохранить скорость проходки без разрушительной вибрации.",
+                    "Успех: вибрация <2.2 g, момент не вырос выше +20%, скорость проходки >=8 м/ч.",
+                    "Смотреть: вибрацию, момент, скорость проходки, износ долота.",
+                    "Крутилки: снизить нагрузку и обороты до устойчивого режима, не давить долото насильно.",
                     8f,
                     50f,
                     125,
@@ -1007,13 +1082,61 @@ namespace SCADASim.Physics
                     current);
             }
 
+            if (pressureMarginLow < 0.45f || pressureMarginHigh < 0.75f || variant == 7)
+            {
+                return new SupervisorTask(
+                    SupervisorTaskType.PressureWindow,
+                    "Распоряжение супервайзера",
+                    "Проверить окно давлений: нужен запас над пластовым давлением и запас до гидроразрыва.",
+                    "Успех: запас над пластовым >0.25 МПа, запас до гидроразрыва >0.45 МПа, баланс расхода в пределах 4%.",
+                    "Смотреть: забойное, пластовое и давление гидроразрыва, расход вход/выход.",
+                    "Крутилки: корректировать плотность раствора и штуцер малыми шагами, расход менять плавно.",
+                    7f,
+                    45f,
+                    140,
+                    80,
+                    current);
+            }
+
+            if (crew.Fatigue > 0.5f || variant == 8)
+            {
+                return new SupervisorTask(
+                    SupervisorTaskType.CrewHandover,
+                    "Подготовка пересменки",
+                    "Начальник смены требует снизить операционный риск перед передачей вахты.",
+                    "Успех: усталость <58%, дисциплина процедур >55%, координация >55%.",
+                    "Смотреть: усталость, дисциплину, координацию и журнал действий бригады.",
+                    "Действия: провести инструктаж, осмотр оборудования и не перегружать бригаду лишними командами.",
+                    6f,
+                    40f,
+                    110,
+                    65,
+                    current);
+            }
+
+            if (variant == 9)
+            {
+                return new SupervisorTask(
+                    SupervisorTaskType.PumpEfficiency,
+                    "Проверка насосного режима",
+                    "Начальство просит подтвердить, что расход работает на очистку, а не просто разгоняет давление.",
+                    "Успех: вынос шлама >64%, давление насоса +18 бар максимум, баланс расхода в пределах 6%.",
+                    "Смотреть: давление насоса, расход вход/выход, вынос шлама, вибрацию.",
+                    "Крутилки: найти умеренный расход, не компенсировать плохую очистку резким ростом оборотов.",
+                    7f,
+                    50f,
+                    125,
+                    70,
+                    current);
+            }
+
             return new SupervisorTask(
                 SupervisorTaskType.ShiftPlan,
                 "План смены",
                 "Рабочий режим без осложнений: держать скорость проходки, давление и механику в коридоре.",
-                "Успех: ROP >10 м/ч, вибрация <2.2 g, износ <75%, окно давлений безопасное.",
-                "Смотреть: ROP, вибрация, износ, BHP/пластовое/ГРП.",
-                "Крутилки: оптимизировать RPM/WOB, расход держать под очистку, ECD не выводить за окно.",
+                "Успех: скорость проходки >10 м/ч, вибрация <2.2 g, износ <75%, окно давлений безопасное.",
+                "Смотреть: скорость проходки, вибрацию, износ, забойное/пластовое давление и гидроразрыв.",
+                "Крутилки: оптимизировать обороты и нагрузку, расход держать под очистку, эквив. плотность не выводить за окно.",
                 8f,
                 55f,
                 120,

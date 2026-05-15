@@ -24,14 +24,14 @@ namespace SCADASim.UI
         private static readonly Color GraphGreen = new Color(0.13f, 0.55f, 0.32f);
         private static readonly Color GraphBlue = new Color(0.26f, 0.52f, 1f);
         private static readonly Color GraphBlack = new Color(0.05f, 0.05f, 0.05f);
-        private static readonly GraphAxisScale TorqueScale = new GraphAxisScale("МОМЕНТ, кНм", 0f, 65f);
-        private static readonly GraphAxisScale VibrationScale = new GraphAxisScale("ВИБР., %", 0f, 100f);
-        private static readonly GraphAxisScale StandpipePressureScale = new GraphAxisScale("ДАВЛ., бар", 0f, 360f);
-        private static readonly GraphAxisScale FlowBalanceScale = new GraphAxisScale("БАЛАНС, л/мин", -600f, 600f);
-        private static readonly GraphAxisScale RopScale = new GraphAxisScale("ROP, м/ч", 0f, 45f);
-        private static readonly GraphAxisScale RiskPercentScale = new GraphAxisScale("РИСК, %", 0f, 100f);
-        private static readonly GraphAxisScale BottomHolePressureScale = new GraphAxisScale("ЗАБОЙ, МПа", 0f, 80f);
-        private static readonly GraphAxisScale PorePressureScale = new GraphAxisScale("ПЛАСТ, МПа", 0f, 80f);
+        private static readonly GraphAxisScale TorqueScale = new GraphAxisScale("Момент, кНм", 0f, 65f);
+        private static readonly GraphAxisScale VibrationScale = new GraphAxisScale("Вибрация, %", 0f, 100f);
+        private static readonly GraphAxisScale StandpipePressureScale = new GraphAxisScale("Давление насоса, бар", 0f, 360f);
+        private static readonly GraphAxisScale FlowBalanceScale = new GraphAxisScale("Баланс расхода, л/мин", -600f, 600f);
+        private static readonly GraphAxisScale RopScale = new GraphAxisScale("Скорость проходки, м/ч", 0f, 45f);
+        private static readonly GraphAxisScale RiskPercentScale = new GraphAxisScale("Риск или износ, %", 0f, 100f);
+        private static readonly GraphAxisScale BottomHolePressureScale = new GraphAxisScale("Забойное давление, МПа", 0f, 80f);
+        private static readonly GraphAxisScale PorePressureScale = new GraphAxisScale("Пластовое давление, МПа", 0f, 80f);
 
         private readonly List<string> locationChoices = new List<string>
         {
@@ -94,6 +94,35 @@ namespace SCADASim.UI
             "ПРОПУСТИТЬ ОБУЧЕНИЕ"
         };
 
+        private readonly List<string> musicVolumeChoices = new List<string>
+        {
+            "ГРОМКОСТЬ 35%",
+            "ГРОМКОСТЬ 15%",
+            "ГРОМКОСТЬ 60%",
+            "МУЗЫКА ВЫКЛ."
+        };
+
+        private readonly List<string> startSpeedChoices = new List<string>
+        {
+            "СТАРТ x1",
+            "СТАРТ x2",
+            "СТАРТ x5"
+        };
+
+        private readonly List<string> shiftDurationChoices = new List<string>
+        {
+            "СМЕНА 8 МИН",
+            "СМЕНА 6 МИН",
+            "СМЕНА 12 МИН"
+        };
+
+        private readonly List<string> supervisorPaceChoices = new List<string>
+        {
+            "ЗАДАЧИ: НОРМАЛЬНО",
+            "ЗАДАЧИ: ЧАЩЕ",
+            "ЗАДАЧИ: РЕЖЕ"
+        };
+
         private DrillingModel drillingModel;
         private CrewManager crewManager;
         private EnvironmentManager environmentManager;
@@ -111,9 +140,11 @@ namespace SCADASim.UI
         private VisualElement introScreen;
         private VisualElement telemetryPage;
         private VisualElement profilePage;
+        private VisualElement crewPage;
         private VisualElement tutorialOverlay;
         private Button telemetryTab;
         private Button profileTab;
+        private Button crewTab;
         private Button tutorialNextButton;
         private Label tutorialTitle;
         private Label tutorialBody;
@@ -137,6 +168,10 @@ namespace SCADASim.UI
         private ChoiceBinding physicsChoice;
         private ChoiceBinding crewChoice;
         private ChoiceBinding tutorialChoice;
+        private ChoiceBinding musicVolumeChoice;
+        private ChoiceBinding startSpeedChoice;
+        private ChoiceBinding shiftDurationChoice;
+        private ChoiceBinding supervisorPaceChoice;
 
         private Label configLine;
         private Label rigModelStatus;
@@ -147,6 +182,13 @@ namespace SCADASim.UI
         private Label pressureGradientValue;
         private Label radioLogValue;
         private Label crewStatusValue;
+        private Label crewShiftValue;
+        private Label crewRosterValue;
+        private Label crewProcedureValue;
+        private Label profileSummaryValue;
+        private Label profilePressureWindowValue;
+        private Label profileRiskValue;
+        private Label profileLegendValue;
         private Image aiAssistantImage;
         private Label aiAssistantCaption;
         private Label aiRecommendationValue;
@@ -304,23 +346,6 @@ namespace SCADASim.UI
             BuildStartScreen(root);
             BuildMainScreen(root);
             BuildIntroScreen(root);
-            
-            // VERY PROMINENT DEBUG BOX
-            VisualElement debugBox = new VisualElement();
-            debugBox.style.width = 300;
-            debugBox.style.height = 300;
-            debugBox.style.backgroundColor = Color.magenta;
-            debugBox.style.position = Position.Absolute;
-            debugBox.style.top = 100;
-            debugBox.style.left = 100;
-            debugBox.style.borderBottomColor = Color.black;
-            debugBox.style.borderBottomWidth = 5;
-            debugBox.pickingMode = PickingMode.Ignore;
-            Label debugText = new Label("DEBUG: UI REBUILT");
-            debugText.style.fontSize = 30;
-            debugText.style.color = Color.white;
-            debugBox.Add(debugText);
-            root.Add(debugBox);
 
             ShowIntroOrStartScreen();
         }
@@ -488,7 +513,7 @@ namespace SCADASim.UI
             VisualElement titleBar = new VisualElement();
             titleBar.AddToClassList("window-titlebar");
             startScreen.Add(titleBar);
-            titleBar.Add(new Label("LUKOIL X ZVZ :: ИНТЕЛЛЕКТУАЛЬНОЕ БУРЕНИЕ v2.0"));
+            titleBar.Add(new Label("LUKOIL X ZVZ :: ИНТЕЛЛЕКТУАЛЬНОЕ БУРЕНИЕ v3.1"));
 
             VisualElement body = new VisualElement();
             body.AddToClassList("start-body");
@@ -510,7 +535,7 @@ namespace SCADASim.UI
             zvz.AddToClassList("zvz-logo");
             brand.Add(zvz);
 
-            Label subtitle = new Label("S C A D A   I N T E L L I G E N T   S I M U L A T I O N   v 2 . 0");
+            Label subtitle = new Label("S C A D A   I N T E L L I G E N T   S I M U L A T I O N   v 3 . 1");
             subtitle.AddToClassList("start-subtitle");
             brand.Add(subtitle);
 
@@ -533,6 +558,10 @@ namespace SCADASim.UI
             difficultyChoice = AddConfigChoice(configPanel, "РЕАЛИЗМ (СЛОЖНОСТЬ):", difficultyChoices, 0);
             physicsChoice = AddConfigChoice(configPanel, "НАСТРОЙКИ ФИЗИКИ:", physicsChoices, 0);
             crewChoice = AddConfigChoice(configPanel, "СОСТАВ БРИГАДЫ:", crewChoices, 0);
+            shiftDurationChoice = AddConfigChoice(configPanel, "ДЛИТЕЛЬНОСТЬ СМЕНЫ:", shiftDurationChoices, 0);
+            supervisorPaceChoice = AddConfigChoice(configPanel, "ЧАСТОТА ЗАДАЧ:", supervisorPaceChoices, 0);
+            startSpeedChoice = AddConfigChoice(configPanel, "СТАРТОВАЯ СКОРОСТЬ:", startSpeedChoices, 0);
+            musicVolumeChoice = AddConfigChoice(configPanel, "ГРОМКОСТЬ МУЗЫКИ:", musicVolumeChoices, 0);
             tutorialChoice = AddConfigChoice(configPanel, "НАЧАЛЬНОЕ ОБУЧЕНИЕ:", tutorialChoices, 0);
 
             Button startButton = new Button(ApplyConfigAndStart);
@@ -553,8 +582,10 @@ namespace SCADASim.UI
 
             telemetryTab = CreateTabButton("ТЕЛЕМЕТРИЯ", ShowTelemetryPage);
             profileTab = CreateTabButton("3D-ПРОФИЛЬ СКВАЖИНЫ", ShowProfilePage);
+            crewTab = CreateTabButton("БРИГАДА", ShowCrewPage);
             tabs.Add(telemetryTab);
             tabs.Add(profileTab);
+            tabs.Add(crewTab);
 
             VisualElement profileControls = new VisualElement();
             profileControls.AddToClassList("profile-view-buttons");
@@ -578,6 +609,11 @@ namespace SCADASim.UI
             mainScreen.Add(profilePage);
             BuildProfilePage(profilePage);
 
+            crewPage = new VisualElement();
+            crewPage.AddToClassList("crew-page");
+            mainScreen.Add(crewPage);
+            BuildCrewPage(crewPage);
+
             BuildTutorialOverlay(mainScreen);
         }
 
@@ -587,9 +623,9 @@ namespace SCADASim.UI
             left.AddToClassList("telemetry-left");
             page.Add(left);
 
-            rotationGraph = AddGraphPanel(left, "ВРАЩЕНИЕ / МОМЕНТ", GraphRed, GraphBlack, TorqueScale, VibrationScale);
-            hydraulicGraph = AddGraphPanel(left, "ГИДРАВЛИКА / ЕМКОСТИ", GraphGreen, GraphBlack, StandpipePressureScale, FlowBalanceScale);
-            bottomGraph = AddGraphPanel(left, "ЗАБОЙНЫЕ ПАРАМЕТРЫ", GraphBlue, GraphRed, RopScale, RiskPercentScale);
+            rotationGraph = AddGraphPanel(left, "ВРАЩЕНИЕ И МОМЕНТ", GraphRed, GraphBlack, TorqueScale, VibrationScale);
+            hydraulicGraph = AddGraphPanel(left, "ГИДРАВЛИКА И РАСХОД", GraphGreen, GraphBlack, StandpipePressureScale, FlowBalanceScale);
+            bottomGraph = AddGraphPanel(left, "СКОРОСТЬ ПРОХОДКИ И ИЗНОС", GraphBlue, GraphRed, RopScale, RiskPercentScale);
 
             VisualElement center = new VisualElement();
             center.AddToClassList("telemetry-center");
@@ -608,7 +644,7 @@ namespace SCADASim.UI
             envTitleRow.Add(lockup);
             environmentStatus = AddStatusBox(environmentPanel, "ПОГОДА: -15.3 C // ВЕТЕР: 13.2 М/С");
             rigModelStatus = AddStatusBox(environmentPanel, "3D МОДЕЛЬ: ОЖИДАНИЕ");
-            formationStatusValue = AddStatusBox(environmentPanel, "ФОРМАЦИЯ: ГЛИНА // TVD: 0M // ECD: 1.10 SG // ВЫНОС ШЛАМА: 86%");
+            formationStatusValue = AddStatusBox(environmentPanel, "ФОРМАЦИЯ: глина // вертикальная глубина 0 м // эквив. плотность 1.10 SG // вынос шлама 86%");
 
             VisualElement pressurePanel = CreateScadaPanel("БАЛАНС ДАВЛЕНИЙ");
             pressurePanel.AddToClassList("pressure-panel");
@@ -618,37 +654,11 @@ namespace SCADASim.UI
             pressurePanel.Add(pressureNumbers);
             pressurePoreValue = CreatePressureNumber(pressureNumbers, "ПЛАСТОВОЕ (МПа)");
             pressureBottomValue = CreatePressureNumber(pressureNumbers, "ЗАБОЙНОЕ (МПа)");
-            pressureGradientValue = CreatePressureNumber(pressureNumbers, "ГРП (МПа)");
+            pressureGradientValue = CreatePressureNumber(pressureNumbers, "ГИДРОРАЗРЫВ (МПа)");
             pressureGraph = new TrendGraphElement(GraphRed, GraphBlack, BottomHolePressureScale, PorePressureScale);
             pressureGraph.AddToClassList("pressure-graph");
             pressurePanel.Add(pressureGraph);
             depthValue = AddStatusBox(pressurePanel, "ГЛУБИНА: 0 МЕТРОВ");
-
-            VisualElement crewPanel = CreateScadaPanel("СВЯЗЬ С БРИГАДОЙ (РАЦИЯ)");
-            center.Add(crewPanel);
-            radioLogValue = AddStatusBox(crewPanel, "[00:00:00] Регион: ЗАПАДНАЯ СИБИРЬ. Бригада: 7 чел. Стартовая готовность.");
-            crewStatusValue = AddStatusBox(crewPanel, "БРИГАДА: опыт 78% // усталость 12% // мораль 82% // реакция 1.0 с.");
-            VisualElement crewImageStrip = new VisualElement();
-            crewImageStrip.AddToClassList("crew-image-strip");
-            crewPanel.Add(crewImageStrip);
-            AddGeneratedImageCard(crewImageStrip, "SCADASim/Generated/crew_driller");
-            AddGeneratedImageCard(crewImageStrip, "SCADASim/Generated/crew_mud");
-            AddGeneratedImageCard(crewImageStrip, "SCADASim/Generated/crew_mwd");
-
-            VisualElement crewActions = new VisualElement();
-            crewActions.AddToClassList("crew-action-grid");
-            crewPanel.Add(crewActions);
-            crewActions.Add(CreateFlatButton("РАСТВОРЩИК: ЗАМЕР", () => RunCrewAction(CrewActionType.MudCheck)));
-            crewActions.Add(CreateFlatButton("МЕХАНИК: ОСМОТР", () => RunCrewAction(CrewActionType.RigInspection)));
-            crewActions.Add(CreateFlatButton("ПЛАН РЕЙСА", () => RunCrewAction(CrewActionType.BitRunPlanning)));
-            crewActions.Add(CreateFlatButton("ИНКЛИНОМЕТРИЯ", () => RunCrewAction(CrewActionType.DirectionalSurvey)));
-            crewActions.Add(CreateFlatButton("ПРОМЫВКА СТВОЛА", () => RunCrewAction(CrewActionType.HoleCleaning)));
-            crewActions.Add(CreateFlatButton("ИНСТРУКТАЖ", () => RunCrewAction(CrewActionType.ShiftBriefing)));
-            crewActions.Add(CreateFlatButton("ПРИТОК: ГЛУШЕНИЕ", () => RunCrewAction(CrewActionType.KickControl)));
-            crewActions.Add(CreateFlatButton("ПОГЛОЩЕНИЕ: LCM", () => RunCrewAction(CrewActionType.LossControl)));
-            crewActions.Add(CreateFlatButton("ПРИХВАТ: РАСХАЖ.", () => RunCrewAction(CrewActionType.FreeStuckPipe)));
-            crewActions.Add(CreateFlatButton("STICK-SLIP: СНИЗИТЬ", () => RunCrewAction(CrewActionType.StickSlipMitigation)));
-            crewActions.Add(CreateFlatButton("ПРОРАБОТКА", () => RunCrewAction(CrewActionType.BackreamAndReam)));
 
             VisualElement right = new VisualElement();
             right.AddToClassList("telemetry-right");
@@ -662,14 +672,14 @@ namespace SCADASim.UI
             telemetryPanel.Add(metricGrid);
             rpmValue = AddMetric(metricGrid, "ОБОРОТЫ");
             torqueValue = AddMetric(metricGrid, "МОМЕНТ (кНм)");
-            ropValue = AddMetric(metricGrid, "ROP");
+            ropValue = AddMetric(metricGrid, "СКОР. ПРОХОДКИ");
             wobValue = AddMetric(metricGrid, "НАГРУЗКА");
-            sppValue = AddMetric(metricGrid, "ДАВЛ. НАСОСА");
+            sppValue = AddMetric(metricGrid, "ДАВЛЕНИЕ НАСОСА");
             flowInValue = AddMetric(metricGrid, "РАСХОД ВХОД");
             flowOutValue = AddMetric(metricGrid, "РАСХОД ВЫХОД");
-            mudWeightValue = AddMetric(metricGrid, "ПЛОТН. Р-РА");
+            mudWeightValue = AddMetric(metricGrid, "ПЛОТНОСТЬ РАСТВОРА");
             bottomTempValue = AddMetric(metricGrid, "ТЕМП. ЗАБОЙ");
-            ecdValue = AddMetric(metricGrid, "ЭКВ. ПЛОТН.");
+            ecdValue = AddMetric(metricGrid, "ЭКВИВ. ПЛОТНОСТЬ");
             vibrationValue = AddMetric(metricGrid, "ВИБРАЦИЯ");
             incValue = AddMetric(metricGrid, "ЗЕНИТ (°)");
             azimuthValue = AddMetric(metricGrid, "АЗИМУТ (°)");
@@ -707,8 +717,8 @@ namespace SCADASim.UI
 
             aiRecommendationValue = AddStatusBox(aiPanel, "МОНИТОРИНГ: отклонений нет. Действие: продолжать текущий режим.");
             supervisorTaskValue = AddStatusBox(aiPanel, "ЗАДАЧА: ожидание распоряжения бурового мастера.");
-            taskEconomyValue = AddStatusBox(aiPanel, "БЮДЖЕТ СМЕНЫ: 0 CR // УСПЕХ 0 // ПРОВАЛ 0.");
-            incidentConsequenceValue = AddStatusBox(aiPanel, "ПОСЛЕДСТВИЯ: НПВ 0 мин // ПРИТОК 0% // ПОГЛОЩЕНИЕ 0%.");
+            taskEconomyValue = AddStatusBox(aiPanel, "БЮДЖЕТ СМЕНЫ: 0 кредитов // выполнено 0 // провалено 0.");
+            incidentConsequenceValue = AddStatusBox(aiPanel, "ПОСЛЕДСТВИЯ: простои 0 мин // приток 0% // поглощение 0%.");
         }
 
         private void BuildProfilePage(VisualElement page)
@@ -721,9 +731,82 @@ namespace SCADASim.UI
             title.AddToClassList("profile-status-title");
             profileStatus.Add(title);
 
-            Label details = new Label("Камера: ПКМ - свободный обзор, WASD/Q/E - движение, Shift - ускорение, колесо - приближение, Alt+ЛКМ - орбита, СКМ - панорама, F - фокус. Траектория и аварийные зоны строятся по выбранному профилю.");
+            Label details = new Label("Камера: ПКМ - свободный обзор, WASD/Q/E - движение, колесо - приближение, F - фокус на стволе. Траектория, станции глубины и зона риска обновляются по текущему режиму бурения.");
             details.AddToClassList("profile-status-body");
             profileStatus.Add(details);
+
+            VisualElement dataPanel = new VisualElement();
+            dataPanel.AddToClassList("profile-data-panel");
+            page.Add(dataPanel);
+
+            Label dataTitle = new Label("ПАРАМЕТРЫ ПРОФИЛЯ");
+            dataTitle.AddToClassList("profile-status-title");
+            dataPanel.Add(dataTitle);
+
+            profileSummaryValue = AddStatusBox(dataPanel, "ТРАЕКТОРИЯ: ожидание данных.");
+            profilePressureWindowValue = AddStatusBox(dataPanel, "ОКНО ДАВЛЕНИЙ: ожидание данных.");
+            profileRiskValue = AddStatusBox(dataPanel, "РИСКИ: ожидание данных.");
+            profileLegendValue = AddStatusBox(dataPanel, "ЛЕГЕНДА: красная сфера - текущее долото; полупрозрачная зона - суммарный операционный риск; метки - станции глубины по стволу.");
+        }
+
+        private void BuildCrewPage(VisualElement page)
+        {
+            VisualElement left = new VisualElement();
+            left.AddToClassList("crew-column-main");
+            page.Add(left);
+
+            VisualElement shiftPanel = CreateScadaPanel("СМЕНА И СОСТАВ БРИГАДЫ");
+            shiftPanel.AddToClassList("crew-shift-panel");
+            left.Add(shiftPanel);
+            crewShiftValue = AddStatusBox(shiftPanel, "СМЕНА: ожидание запуска.");
+            crewRosterValue = AddStatusBox(shiftPanel, "РОЛИ: состав будет назначен после запуска сценария.");
+            crewProcedureValue = AddStatusBox(shiftPanel, "ГОТОВНОСТЬ: опыт, усталость, дисциплина и координация будут рассчитаны моделью.");
+
+            VisualElement imageStrip = new VisualElement();
+            imageStrip.AddToClassList("crew-image-strip");
+            shiftPanel.Add(imageStrip);
+            AddGeneratedImageCard(imageStrip, "SCADASim/Generated/crew_driller");
+            AddGeneratedImageCard(imageStrip, "SCADASim/Generated/crew_mud");
+            AddGeneratedImageCard(imageStrip, "SCADASim/Generated/crew_mwd");
+
+            VisualElement radioPanel = CreateScadaPanel("РАЦИЯ И ЖУРНАЛ ДЕЙСТВИЙ");
+            radioPanel.AddToClassList("crew-radio-panel");
+            left.Add(radioPanel);
+            radioLogValue = AddStatusBox(radioPanel, "[00:00:00] Ожидание запуска смены.");
+            crewStatusValue = AddStatusBox(radioPanel, "БРИГАДА: данные появятся после инициализации системы.");
+
+            VisualElement actionsPanel = CreateScadaPanel("ПОЛЕВЫЕ ПРОЦЕДУРЫ");
+            actionsPanel.AddToClassList("crew-actions-panel");
+            left.Add(actionsPanel);
+            Label actionIntro = new Label("Процедуры выполняются с учетом опыта, усталости и дисциплины текущей смены.");
+            actionIntro.AddToClassList("crew-note");
+            actionsPanel.Add(actionIntro);
+
+            VisualElement crewActions = new VisualElement();
+            crewActions.AddToClassList("crew-action-grid");
+            actionsPanel.Add(crewActions);
+            crewActions.Add(CreateFlatButton("РАСТВОР: ЗАМЕР", () => RunCrewAction(CrewActionType.MudCheck)));
+            crewActions.Add(CreateFlatButton("ОСМОТР ВЫШКИ", () => RunCrewAction(CrewActionType.RigInspection)));
+            crewActions.Add(CreateFlatButton("ПЛАН РЕЙСА", () => RunCrewAction(CrewActionType.BitRunPlanning)));
+            crewActions.Add(CreateFlatButton("ИНКЛИНОМЕТРИЯ", () => RunCrewAction(CrewActionType.DirectionalSurvey)));
+            crewActions.Add(CreateFlatButton("ПРОМЫВКА СТВОЛА", () => RunCrewAction(CrewActionType.HoleCleaning)));
+            crewActions.Add(CreateFlatButton("ИНСТРУКТАЖ", () => RunCrewAction(CrewActionType.ShiftBriefing)));
+            crewActions.Add(CreateFlatButton("ПРИТОК: ГЛУШЕНИЕ", () => RunCrewAction(CrewActionType.KickControl)));
+            crewActions.Add(CreateFlatButton("ПОГЛОЩЕНИЕ: МАТЕРИАЛ", () => RunCrewAction(CrewActionType.LossControl)));
+            crewActions.Add(CreateFlatButton("ПРИХВАТ: РАСХАЖИВАНИЕ", () => RunCrewAction(CrewActionType.FreeStuckPipe)));
+            crewActions.Add(CreateFlatButton("АВТОКОЛЕБАНИЯ: СНИЗИТЬ", () => RunCrewAction(CrewActionType.StickSlipMitigation)));
+            crewActions.Add(CreateFlatButton("ПРОРАБОТКА СТВОЛА", () => RunCrewAction(CrewActionType.BackreamAndReam)));
+
+            VisualElement right = new VisualElement();
+            right.AddToClassList("crew-column-side");
+            page.Add(right);
+
+            VisualElement doctrinePanel = CreateScadaPanel("ОПЕРАЦИОННАЯ ОЦЕНКА");
+            doctrinePanel.AddToClassList("crew-doctrine-panel");
+            right.Add(doctrinePanel);
+            AddStatusBox(doctrinePanel, "РЕАЛИЗМ: команды не исполняются мгновенно. Задержка, ошибка уставки и качество процедур зависят от усталости, опыта и координации смены.");
+            AddStatusBox(doctrinePanel, "ПЕРЕСМЕНКА: при окончании смены меняются работники, их профиль опыта и текущая усталость. Инструктаж снижает риск плохой передачи вахты.");
+            AddStatusBox(doctrinePanel, "РАБОТА С РИСКАМИ: при притоке контролируйте выход, газ и окно давлений; при поглощении снижайте динамическую нагрузку; при прихвате не дергайте колонну резкими командами.");
         }
 
         private void BuildTutorialOverlay(VisualElement parent)
@@ -773,11 +856,12 @@ namespace SCADASim.UI
         private void ApplyConfigAndStart()
         {
             SimulationRuntimeConfig config = BuildRuntimeConfigFromUI();
-            Debug.Log($"SCADA simulation start: {config.EnvironmentType}, {config.ProfileType}, MD {config.StartMeasuredDepth:0}-{config.MaxMeasuredDepth:0} m.");
+            Debug.Log($"SCADA simulation start: {config.EnvironmentType}, {config.ProfileType}, measured depth {config.StartMeasuredDepth:0}-{config.MaxMeasuredDepth:0} m.");
 
             environmentManager?.LoadEnvironment(config.EnvironmentType);
             rigModelManager?.LoadRigModel(config.EnvironmentType);
             crewManager?.ApplyPreset(config.CrewPreset);
+            crewManager?.SetShiftDurationMinutes(ResolveShiftDurationMinutes());
 
             wellbore?.ConfigureRuntime(
                 config.ProfileType,
@@ -794,6 +878,9 @@ namespace SCADASim.UI
 
             GeologyModel geology = GeologyModel.CreateRuntimeDemo(config.GeologyRegion);
             drillingModel?.ApplyRuntimeConfig(config, geology);
+            drillingModel?.SetSimulationSpeedMultiplier(ResolveStartSpeedMultiplier());
+            drillingModel?.SetSupervisorCadenceMultiplier(ResolveSupervisorCadenceMultiplier());
+            musicPlayer?.SetVolume(ResolveMusicVolume());
             bool runTutorial = tutorialChoice == null || tutorialChoice.Index == 0;
             drillingModel?.SetSimulating(!runTutorial);
 
@@ -878,7 +965,7 @@ namespace SCADASim.UI
             flowInValue.text = $"{state.FlowRateLps * 60f:0}";
             flowOutValue.text = $"{state.FlowOutLps * 60f:0}";
             mudWeightValue.text = $"{state.MudWeightSG:0.00}";
-            depthValue.text = $"ГЛУБИНА: MD {state.MeasuredDepth:0} м // TVD {state.TrueVerticalDepth:0} м";
+            depthValue.text = $"ГЛУБИНА: по стволу {state.MeasuredDepth:0} м // по вертикали {state.TrueVerticalDepth:0} м";
             bottomTempValue.text = $"{12f + state.TrueVerticalDepth * 0.031f:0} C";
             ecdValue.text = $"{state.EquivalentCirculatingDensitySG:0.00}";
             vibrationValue.text = $"{state.Vibration.LowFrequencyEnergy * 3.5f:0.0}";
@@ -889,12 +976,12 @@ namespace SCADASim.UI
             pressurePoreValue.text = $"{state.PorePressureMPa:0.0}";
             pressureBottomValue.text = $"{state.BottomHolePressureMPa:0.0}";
             pressureGradientValue.text = $"{state.FracturePressureMPa:0.0}";
-            formationStatusValue.text = $"ФОРМАЦИЯ: {ToRussianLithology(state.Lithology)} // TVD: {state.TrueVerticalDepth:0} м // ECD: {state.EquivalentCirculatingDensitySG:0.00} SG // ВЫНОС ШЛАМА: {state.CuttingsTransportEfficiency01 * 100f:0}% // ГАЗ: {state.GasUnitsPercent:0.0}%";
+            formationStatusValue.text = $"ФОРМАЦИЯ: {ToRussianLithology(state.Lithology)} // вертикаль {state.TrueVerticalDepth:0} м // эквив. плотность {state.EquivalentCirculatingDensitySG:0.00} SG // вынос шлама {state.CuttingsTransportEfficiency01 * 100f:0}% // газ {state.GasUnitsPercent:0.0}%";
 
-            rpmControlValue.text = $"ОБ/МИН: {state.Rpm:0}";
-            wobControlValue.text = $"НАГР.: {state.WeightOnBitTonnes:0.0} т";
+            rpmControlValue.text = $"ОБОРОТЫ: {state.Rpm:0} об/мин";
+            wobControlValue.text = $"НАГРУЗКА: {state.WeightOnBitTonnes:0.0} т";
             flowControlValue.text = $"РАСХОД: {state.FlowRateLps * 60f:0} л/мин";
-            mudControlValue.text = $"ПЛОТН.: {state.MudWeightSG:0.00} SG";
+            mudControlValue.text = $"ПЛОТНОСТЬ: {state.MudWeightSG:0.00} SG";
             chokeControlValue.text = $"ШТУЦЕР: {state.ChokeOpening01 * 100f:0}%";
             SyncKnobValue(rpmKnob, state.Rpm);
             SyncKnobValue(wobKnob, state.WeightOnBitTonnes);
@@ -912,20 +999,64 @@ namespace SCADASim.UI
             }
             if (crewStatusValue != null)
             {
-                crewStatusValue.text =
-                    $"БРИГАДА: опыт {crew.ExperienceLevel * 100f:0}% // усталость {crew.Fatigue * 100f:0}% // мораль {crew.Morale * 100f:0}% // реакция {crew.ReactionDelaySeconds:0.0} с // дисциплина {crew.ProcedureDiscipline01 * 100f:0}%";
+                string shiftLine = crewManager != null
+                    ? $"{crewManager.ShiftStatusLine}. {crewManager.ActiveCrewLine}."
+                    : "смена не назначена.";
+                crewStatusValue.text = CompactStatus(
+                    $"БРИГАДА: {shiftLine} Усталость {crew.Fatigue * 100f:0}%, мораль {crew.Morale * 100f:0}%, реакция {crew.ReactionDelaySeconds:0.0} с, дисциплина {crew.ProcedureDiscipline01 * 100f:0}%.",
+                    230);
+            }
+
+            if (crewShiftValue != null)
+            {
+                crewShiftValue.text = crewManager != null
+                    ? $"СМЕНА: {crewManager.ShiftStatusLine}."
+                    : "СМЕНА: не назначена.";
+            }
+
+            if (crewRosterValue != null)
+            {
+                crewRosterValue.text = crewManager != null
+                    ? $"РОЛИ: {crewManager.ActiveCrewLine}."
+                    : "РОЛИ: ожидание состава.";
+            }
+
+            if (crewProcedureValue != null)
+            {
+                crewProcedureValue.text =
+                    $"ГОТОВНОСТЬ: опыт {crew.ExperienceLevel * 100f:0}% // усталость {crew.Fatigue * 100f:0}% // дисциплина {crew.ProcedureDiscipline01 * 100f:0}% // координация {crew.ShiftCoordination01 * 100f:0}% // реакция {crew.ReactionDelaySeconds:0.0} с.";
+            }
+
+            if (profileSummaryValue != null)
+            {
+                profileSummaryValue.text =
+                    $"ТРАЕКТОРИЯ: по стволу {state.MeasuredDepth:0} м // вертикаль {state.TrueVerticalDepth:0} м // зенит {state.InclinationDegrees:0.0}° // азимут {state.AzimuthDegrees:0}° // искривление {state.DoglegSeverityDegPer30m:0.0}°/30 м.";
+            }
+
+            if (profilePressureWindowValue != null)
+            {
+                float lowMargin = state.BottomHolePressureMPa - state.PorePressureMPa;
+                float highMargin = state.FracturePressureMPa - state.BottomHolePressureMPa;
+                profilePressureWindowValue.text =
+                    $"ОКНО ДАВЛЕНИЙ: запас к пластовому {lowMargin:0.0} МПа // запас до гидроразрыва {highMargin:0.0} МПа // эквив. плотность {state.EquivalentCirculatingDensitySG:0.00} SG.";
+            }
+
+            if (profileRiskValue != null)
+            {
+                profileRiskValue.text =
+                    $"РИСКИ: прихват {state.StuckPipeRisk01 * 100f:0}% // осыпь {state.BoreholeInstabilityRisk01 * 100f:0}% // приток {state.KickRisk01 * 100f:0}% // поглощение {state.LostCirculationRisk01 * 100f:0}% // очистка {state.CuttingsTransportEfficiency01 * 100f:0}%.";
             }
 
             if (incidentConsequenceValue != null)
             {
                 incidentConsequenceValue.text =
-                    $"ПОСЛЕДСТВИЯ: НПВ {state.NonProductiveTimeMinutes:0} мин // ПРИТОК {state.KickRisk01 * 100f:0}% // ПОГЛОЩЕНИЕ {state.LostCirculationRisk01 * 100f:0}%";
+                    $"ПОСЛЕДСТВИЯ: простои {state.NonProductiveTimeMinutes:0} мин // приток {state.KickRisk01 * 100f:0}% // поглощение {state.LostCirculationRisk01 * 100f:0}%";
             }
 
             if (taskEconomyValue != null && drillingModel != null)
             {
                 taskEconomyValue.text =
-                    $"БЮДЖЕТ СМЕНЫ: {drillingModel.CompanyCredits:+0;-0;0} CR // УСПЕХ {drillingModel.SuccessfulSupervisorTasks} // ПРОВАЛ {drillingModel.FailedSupervisorTasks}.";
+                    $"БЮДЖЕТ СМЕНЫ: {drillingModel.CompanyCredits:+0;-0;0} кредитов // выполнено {drillingModel.SuccessfulSupervisorTasks} // провалено {drillingModel.FailedSupervisorTasks}.";
             }
 
             if (aiAssistantImage != null && aiAssistantPortrait != null)
@@ -952,7 +1083,7 @@ namespace SCADASim.UI
 
             if (state.Vibration.LowFrequencyEnergy > 0.58f && state.InclinationDegrees > 70f && crew.Fatigue > 0.5f)
             {
-                aiRecommendationValue.text = "РЕКОМЕНДАЦИЯ ИИ: риск stick-slip. Действие: плавно снизить RPM на 10-15% и стабилизировать WOB.";
+                aiRecommendationValue.text = "РЕКОМЕНДАЦИЯ ИИ: риск автоколебаний колонны. Действие: плавно снизить обороты на 10-15% и стабилизировать нагрузку.";
             }
         }
 
@@ -972,7 +1103,7 @@ namespace SCADASim.UI
                     incidentConsequenceValue.text = CompactStatus($"ПОСЛЕДСТВИЯ: {incident.Consequence}", 180);
                 }
 
-                radioLogValue.text = $"[{FormatClock()}] Инцидент на MD {incident.MeasuredDepth:0} м: {incident.Title}.";
+                radioLogValue.text = $"[{FormatClock()}] Инцидент на глубине по стволу {incident.MeasuredDepth:0} м: {incident.Title}.";
                 return;
             }
 
@@ -996,12 +1127,12 @@ namespace SCADASim.UI
                 aiRecommendationValue.text = CompactStatus($"{status}: {taskResult.Summary}", 190);
                 if (supervisorTaskValue != null)
                 {
-                    supervisorTaskValue.text = $"{status}: {taskResult.Task.Title}. {(taskResult.CreditsDelta >= 0 ? "+" : string.Empty)}{taskResult.CreditsDelta} CR.";
+                    supervisorTaskValue.text = $"{status}: {taskResult.Task.Title}. {(taskResult.CreditsDelta >= 0 ? "+" : string.Empty)}{taskResult.CreditsDelta} кредитов.";
                 }
 
                 if (taskEconomyValue != null)
                 {
-                    taskEconomyValue.text = $"БЮДЖЕТ СМЕНЫ: {taskResult.TotalCredits:+0;-0;0} CR // ПОСЛЕДНИЙ РЕЗУЛЬТАТ: {(taskResult.CreditsDelta >= 0 ? "+" : string.Empty)}{taskResult.CreditsDelta} CR.";
+                    taskEconomyValue.text = $"БЮДЖЕТ СМЕНЫ: {taskResult.TotalCredits:+0;-0;0} кредитов // последний результат: {(taskResult.CreditsDelta >= 0 ? "+" : string.Empty)}{taskResult.CreditsDelta}.";
                 }
 
                 radioLogValue.text = $"[{FormatClock()}] {status}: {taskResult.Summary}";
@@ -1075,8 +1206,10 @@ namespace SCADASim.UI
         {
             telemetryPage.style.display = DisplayStyle.Flex;
             profilePage.style.display = DisplayStyle.None;
+            crewPage.style.display = DisplayStyle.None;
             telemetryTab.AddToClassList("tab-active");
             profileTab.RemoveFromClassList("tab-active");
+            crewTab.RemoveFromClassList("tab-active");
         }
 
         private void ShowTutorialOverlay()
@@ -1125,13 +1258,13 @@ namespace SCADASim.UI
             {
                 case 0:
                     tutorialTitle.text = "1/8  ЦЕЛЬ СМЕНЫ";
-                    tutorialBody.text = "Держите скважину в безопасном окне давлений: забойное давление должно быть выше пластового, но ниже давления ГРП. Следите за расходом вход/выход: рост выхода и газа говорит о притоке, падение выхода - о поглощении.";
+                    tutorialBody.text = "Держите скважину в безопасном окне давлений: забойное давление должно быть выше пластового, но ниже давления гидроразрыва. Следите за расходом вход/выход: рост выхода и газа говорит о притоке, падение выхода - о поглощении.";
                     tutorialNextButton.text = "ДАЛЕЕ";
                     break;
 
                 case 1:
                     tutorialTitle.text = "2/8  УПРАВЛЕНИЕ";
-                    tutorialBody.text = "Обороты влияют на момент и вибрацию, нагрузка - на ROP и износ долота, расход - на вынос шлама и давление насоса. Плотность раствора и штуцер меняют ECD, поэтому ими нельзя работать резко.";
+                    tutorialBody.text = "Обороты влияют на момент и вибрацию, нагрузка - на скорость проходки и износ долота, расход - на вынос шлама и давление насоса. Плотность раствора и штуцер меняют эквивалентную плотность, поэтому ими нельзя работать резко.";
                     tutorialNextButton.text = "ДАЛЕЕ";
                     break;
 
@@ -1143,13 +1276,13 @@ namespace SCADASim.UI
 
                 case 3:
                     tutorialTitle.text = "4/8  ЗАДАЧИ ОТ МАСТЕРА";
-                    tutorialBody.text = "Задачи появляются последовательно и имеют реальный таймер. Если время истекло, система выдает новую вводную и фиксирует последствия: НПВ, рост риска притока, поглощения или прихвата.";
+                    tutorialBody.text = "Задачи появляются последовательно и имеют реальный таймер. Если время истекло, система выдает новую вводную и фиксирует последствия: простои, рост риска притока, поглощения или прихвата.";
                     tutorialNextButton.text = "ДАЛЕЕ";
                     break;
 
                 case 4:
                     tutorialTitle.text = "5/8  АВАРИЙНЫЕ ПРОЦЕДУРЫ";
-                    tutorialBody.text = "Кнопки бригады - это не магия, а полевые процедуры. При притоке используйте глушение, при поглощении - LCM и снижение расхода, при прихвате - расхаживание, при Stick-Slip - снижение оборотов и нагрузки.";
+                    tutorialBody.text = "Кнопки бригады - это не магия, а полевые процедуры. При притоке используйте глушение, при поглощении - материал от поглощения и снижение расхода, при прихвате - расхаживание, при автоколебаниях - снижение оборотов и нагрузки.";
                     tutorialNextButton.text = "ДАЛЕЕ";
                     break;
 
@@ -1161,7 +1294,7 @@ namespace SCADASim.UI
 
                 case 6:
                     tutorialTitle.text = "7/8  3D И КАМЕРА";
-                    tutorialBody.text = "В 3D-профиле видно текущую позицию долота, станции MD и цветовую зону риска. При наклонном и горизонтальном бурении следите за шламовой постелью, drag, Stick-Slip, притоком и поглощением.";
+                    tutorialBody.text = "В 3D-профиле видно текущую позицию долота, станции глубины по стволу и цветовую зону риска. При наклонном и горизонтальном бурении следите за шламовой постелью, сопротивлением движению, автоколебаниями, притоком и поглощением.";
                     tutorialNextButton.text = "ДАЛЕЕ";
                     break;
 
@@ -1177,13 +1310,25 @@ namespace SCADASim.UI
         {
             telemetryPage.style.display = DisplayStyle.None;
             profilePage.style.display = DisplayStyle.Flex;
+            crewPage.style.display = DisplayStyle.None;
             profileTab.AddToClassList("tab-active");
             telemetryTab.RemoveFromClassList("tab-active");
+            crewTab.RemoveFromClassList("tab-active");
             if (cameraOrbit != null)
             {
                 cameraOrbit.SetTarget(ResolveWellboreViewTarget());
                 cameraOrbit.SetView(140f, 30f, 58f);
             }
+        }
+
+        private void ShowCrewPage()
+        {
+            telemetryPage.style.display = DisplayStyle.None;
+            profilePage.style.display = DisplayStyle.None;
+            crewPage.style.display = DisplayStyle.Flex;
+            crewTab.AddToClassList("tab-active");
+            telemetryTab.RemoveFromClassList("tab-active");
+            profileTab.RemoveFromClassList("tab-active");
         }
 
         private void ReturnToMainMenu()
@@ -1633,6 +1778,80 @@ namespace SCADASim.UI
             }
         }
 
+        private float ResolveMusicVolume()
+        {
+            if (musicVolumeChoice == null)
+            {
+                return 0.35f;
+            }
+
+            switch (musicVolumeChoice.Index)
+            {
+                case 1:
+                    return 0.15f;
+                case 2:
+                    return 0.6f;
+                case 3:
+                    return 0f;
+                default:
+                    return 0.35f;
+            }
+        }
+
+        private float ResolveStartSpeedMultiplier()
+        {
+            if (startSpeedChoice == null)
+            {
+                return 1f;
+            }
+
+            switch (startSpeedChoice.Index)
+            {
+                case 1:
+                    return 2f;
+                case 2:
+                    return 5f;
+                default:
+                    return 1f;
+            }
+        }
+
+        private float ResolveShiftDurationMinutes()
+        {
+            if (shiftDurationChoice == null)
+            {
+                return 8f;
+            }
+
+            switch (shiftDurationChoice.Index)
+            {
+                case 1:
+                    return 6f;
+                case 2:
+                    return 12f;
+                default:
+                    return 8f;
+            }
+        }
+
+        private float ResolveSupervisorCadenceMultiplier()
+        {
+            if (supervisorPaceChoice == null)
+            {
+                return 1f;
+            }
+
+            switch (supervisorPaceChoice.Index)
+            {
+                case 1:
+                    return 0.65f;
+                case 2:
+                    return 1.45f;
+                default:
+                    return 1f;
+            }
+        }
+
         private static float CalculateMaxMeasuredDepth(WellboreProfileType profile, float startDepth)
         {
             float profileDepth;
@@ -1785,7 +2004,7 @@ namespace SCADASim.UI
                 ? FormatCountdown(remainingMinutes)
                 : "СРОК ИСТЕК";
 
-            return $"ЗАДАЧА: {task.Title}. ТАЙМЕР: {timerText}. НАГРАДА +{task.RewardCredits} CR / ШТРАФ -{task.FailurePenaltyCredits} CR. {task.Objective} ДАТЧИКИ: {task.SensorFocus} РУЧКИ: {task.ControlHints} КРИТЕРИЙ: {task.SuccessCriteria}";
+            return $"ЗАДАЧА: {task.Title}. До срока: {timerText}. Бонус +{task.RewardCredits} / штраф -{task.FailurePenaltyCredits} кредитов. Цель: {task.Objective} Контроль: {task.SensorFocus} Действие: {task.ControlHints} Критерий: {task.SuccessCriteria}";
         }
 
         private static string FormatCountdown(float minutes)
@@ -1807,7 +2026,7 @@ namespace SCADASim.UI
 
         private sealed class KnobControlElement : VisualElement
         {
-            private const float DragPixelsForFullRange = 340f;
+            private const float DragPixelsForFullRange = 260f;
             private readonly float min;
             private readonly float max;
             private readonly float step;
@@ -2073,7 +2292,7 @@ namespace SCADASim.UI
             private const int Capacity = 180;
             private const float PlotLeftPadding = 48f;
             private const float PlotRightPadding = 48f;
-            private const float PlotTopPadding = 16f;
+            private const float PlotTopPadding = 30f;
             private const float PlotBottomPadding = 24f;
 
             private readonly List<float> primary = new List<float>(Capacity);
@@ -2105,7 +2324,7 @@ namespace SCADASim.UI
                 secondaryMinLabel = CreateGraphLabel("graph-label-secondary-min", secondaryColor);
                 CreateAxisTitle(primaryScale.Title, "graph-axis-title-left", primaryColor);
                 CreateAxisTitle(secondaryScale.Title, "graph-axis-title-right", secondaryColor);
-                CreateAxisTitle("ВРЕМЯ, 27 С", "graph-axis-title-bottom", GraphBlack);
+                CreateAxisTitle("Последние 27 с", "graph-axis-title-bottom", GraphBlack);
 
                 UpdateLabels();
                 generateVisualContent += Draw;

@@ -19,8 +19,54 @@ namespace SCADASim.Crew
         [SerializeField] private float fatigueGrowthPerRealMinute = 0.025f;
         [SerializeField] private float moraleRecoveryPerRealMinute = 0.004f;
 
+        [Header("Shift Schedule")]
+        [SerializeField] private float shiftDurationMinutes = 8f;
+
         [Header("Integration")]
         [SerializeField] private SimulationEventChannel eventChannel;
+
+        private static readonly CrewShiftProfile[] ShiftProfiles =
+        {
+            new CrewShiftProfile(
+                "дневная смена A",
+                "бурильщик Иванов",
+                "буровой мастер Каюмов",
+                "растворщик Сафиуллин",
+                "инженер ННБ Орлова",
+                0.05f,
+                -0.02f,
+                0.03f,
+                0.08f,
+                0.04f,
+                0.02f,
+                0.06f),
+            new CrewShiftProfile(
+                "ночная смена B",
+                "бурильщик Ахметов",
+                "буровой мастер Смирнов",
+                "растворщик Лебедев",
+                "инженер ННБ Морозова",
+                -0.02f,
+                0.08f,
+                -0.03f,
+                -0.02f,
+                0.02f,
+                0.06f,
+                -0.01f),
+            new CrewShiftProfile(
+                "смена C, стажерская поддержка",
+                "бурильщик Петров",
+                "буровой мастер Галиев",
+                "растворщик Никитин",
+                "инженер ННБ Волкова",
+                -0.07f,
+                0.04f,
+                0.04f,
+                -0.05f,
+                -0.03f,
+                -0.01f,
+                -0.06f)
+        };
 
         private readonly List<PendingCrewCommand> pendingCommands = new List<PendingCrewCommand>();
         private float procedureDiscipline01 = 0.58f;
@@ -28,16 +74,45 @@ namespace SCADASim.Crew
         private float maintenanceReadiness01 = 0.62f;
         private float shiftCoordination01 = 0.6f;
         private float lastEventTime;
+        private float presetExperienceLevel;
+        private float presetFatigue;
+        private float presetMorale;
+        private float presetProcedureDiscipline01;
+        private float presetSituationalAwareness01;
+        private float presetMaintenanceReadiness01;
+        private float presetShiftCoordination01;
+        private int operationalDay = 1;
+        private int currentShiftIndex;
+        private float shiftClockSeconds;
 
         public event Action<CrewIncident> IncidentRaised;
 
         public float ExperienceLevel => experienceLevel;
         public float Fatigue => fatigue;
         public float Morale => morale;
+        public int OperationalDay => operationalDay;
+        public string ShiftStatusLine => $"день {operationalDay}, {CurrentShift.Name}, до пересменки {FormatRemainingShift()}";
+        public string ActiveCrewLine => $"{CurrentShift.Toolpusher}; {CurrentShift.Driller}; {CurrentShift.MudEngineer}; {CurrentShift.DirectionalEngineer}";
+        public string CurrentShiftName => CurrentShift.Name;
+
+        private CrewShiftProfile CurrentShift => ShiftProfiles[Mathf.Clamp(currentShiftIndex, 0, ShiftProfiles.Length - 1)];
 
         public void Configure(SimulationEventChannel channel)
         {
             eventChannel = channel;
+        }
+
+        private void Awake()
+        {
+            SetPresetBaseline(
+                experienceLevel,
+                fatigue,
+                morale,
+                procedureDiscipline01,
+                situationalAwareness01,
+                maintenanceReadiness01,
+                shiftCoordination01);
+            ApplyCurrentShiftProfile(true, false);
         }
 
         public void ApplyPreset(CrewPreset preset)
@@ -45,45 +120,134 @@ namespace SCADASim.Crew
             switch (preset)
             {
                 case CrewPreset.FullSeven:
-                    experienceLevel = 0.78f;
-                    fatigue = 0.12f;
-                    morale = 0.82f;
-                    procedureDiscipline01 = 0.72f;
-                    situationalAwareness01 = 0.68f;
-                    maintenanceReadiness01 = 0.76f;
-                    shiftCoordination01 = 0.74f;
+                    SetPresetBaseline(0.78f, 0.12f, 0.82f, 0.72f, 0.68f, 0.76f, 0.74f);
                     break;
 
                 case CrewPreset.StandardFour:
-                    experienceLevel = 0.62f;
-                    fatigue = 0.24f;
-                    morale = 0.72f;
-                    procedureDiscipline01 = 0.6f;
-                    situationalAwareness01 = 0.56f;
-                    maintenanceReadiness01 = 0.62f;
-                    shiftCoordination01 = 0.58f;
+                    SetPresetBaseline(0.62f, 0.24f, 0.72f, 0.6f, 0.56f, 0.62f, 0.58f);
                     break;
 
                 case CrewPreset.ReducedThree:
-                    experienceLevel = 0.54f;
-                    fatigue = 0.36f;
-                    morale = 0.64f;
-                    procedureDiscipline01 = 0.48f;
-                    situationalAwareness01 = 0.46f;
-                    maintenanceReadiness01 = 0.52f;
-                    shiftCoordination01 = 0.44f;
+                    SetPresetBaseline(0.54f, 0.36f, 0.64f, 0.48f, 0.46f, 0.52f, 0.44f);
                     break;
 
                 case CrewPreset.TraineeShift:
-                    experienceLevel = 0.36f;
-                    fatigue = 0.22f;
-                    morale = 0.76f;
-                    procedureDiscipline01 = 0.42f;
-                    situationalAwareness01 = 0.38f;
-                    maintenanceReadiness01 = 0.5f;
-                    shiftCoordination01 = 0.46f;
+                    SetPresetBaseline(0.36f, 0.22f, 0.76f, 0.42f, 0.38f, 0.5f, 0.46f);
                     break;
             }
+
+            operationalDay = 1;
+            currentShiftIndex = 0;
+            shiftClockSeconds = 0f;
+            ApplyCurrentShiftProfile(true, false);
+        }
+
+        public void SetShiftDurationMinutes(float minutes)
+        {
+            shiftDurationMinutes = Mathf.Clamp(minutes, 3f, 24f);
+            float shiftDurationSeconds = Mathf.Max(60f, shiftDurationMinutes * 60f);
+            shiftClockSeconds = Mathf.Min(shiftClockSeconds, Mathf.Max(0f, shiftDurationSeconds - 1f));
+        }
+
+        public void AdvanceShiftTime(float deltaSeconds)
+        {
+            if (deltaSeconds <= 0f)
+            {
+                return;
+            }
+
+            shiftClockSeconds += deltaSeconds;
+            float workload = 1f + pendingCommands.Count * 0.12f;
+            CrewShiftProfile profile = CurrentShift;
+            fatigue = Mathf.Clamp01(fatigue + fatigueGrowthPerRealMinute * workload * deltaSeconds / 60f);
+            morale = Mathf.Clamp01(morale + moraleRecoveryPerRealMinute * deltaSeconds / 60f - fatigue * 0.002f * deltaSeconds / 60f);
+            procedureDiscipline01 = Mathf.MoveTowards(procedureDiscipline01, Mathf.Clamp01(presetProcedureDiscipline01 + profile.DisciplineOffset), deltaSeconds * 0.002f / 60f);
+            situationalAwareness01 = Mathf.MoveTowards(situationalAwareness01, Mathf.Clamp01(presetSituationalAwareness01 + profile.AwarenessOffset), deltaSeconds * 0.003f / 60f);
+            maintenanceReadiness01 = Mathf.MoveTowards(maintenanceReadiness01, Mathf.Clamp01(presetMaintenanceReadiness01 + profile.MaintenanceOffset), deltaSeconds * 0.0015f / 60f);
+            shiftCoordination01 = Mathf.MoveTowards(shiftCoordination01, Mathf.Clamp01(presetShiftCoordination01 + profile.CoordinationOffset), deltaSeconds * 0.0025f / 60f);
+
+            float shiftDurationSeconds = Mathf.Max(60f, shiftDurationMinutes * 60f);
+            while (shiftClockSeconds >= shiftDurationSeconds)
+            {
+                shiftClockSeconds -= shiftDurationSeconds;
+                RotateShift();
+            }
+        }
+
+        public void ApplyFatiguePenalty(float fatigueDelta01, float moralePenalty01)
+        {
+            fatigue = Mathf.Clamp01(fatigue + fatigueDelta01);
+            morale = Mathf.Clamp01(morale - moralePenalty01);
+            shiftCoordination01 = Mathf.Clamp01(shiftCoordination01 - moralePenalty01 * 0.7f);
+        }
+
+        private void SetPresetBaseline(
+            float experience,
+            float startFatigue,
+            float startMorale,
+            float discipline,
+            float awareness,
+            float maintenance,
+            float coordination)
+        {
+            presetExperienceLevel = experience;
+            presetFatigue = startFatigue;
+            presetMorale = startMorale;
+            presetProcedureDiscipline01 = discipline;
+            presetSituationalAwareness01 = awareness;
+            presetMaintenanceReadiness01 = maintenance;
+            presetShiftCoordination01 = coordination;
+        }
+
+        private void RotateShift()
+        {
+            currentShiftIndex++;
+            if (currentShiftIndex >= ShiftProfiles.Length)
+            {
+                currentShiftIndex = 0;
+                operationalDay++;
+            }
+
+            ApplyCurrentShiftProfile(false, true);
+        }
+
+        private void ApplyCurrentShiftProfile(bool resetFatigue, bool raiseEvent)
+        {
+            CrewShiftProfile profile = CurrentShift;
+            experienceLevel = Mathf.Clamp01(presetExperienceLevel + profile.ExperienceOffset);
+            morale = Mathf.Clamp01(presetMorale + profile.MoraleOffset);
+            procedureDiscipline01 = Mathf.Clamp01(presetProcedureDiscipline01 + profile.DisciplineOffset);
+            situationalAwareness01 = Mathf.Clamp01(presetSituationalAwareness01 + profile.AwarenessOffset);
+            maintenanceReadiness01 = Mathf.Clamp01(presetMaintenanceReadiness01 + profile.MaintenanceOffset);
+            shiftCoordination01 = Mathf.Clamp01(presetShiftCoordination01 + profile.CoordinationOffset);
+
+            float freshFatigue = Mathf.Clamp01(presetFatigue + profile.FatigueOffset);
+            fatigue = resetFatigue
+                ? freshFatigue
+                : Mathf.Clamp01(Mathf.Lerp(fatigue, freshFatigue, 0.72f) + 0.035f);
+
+            if (raiseEvent)
+            {
+                eventChannel?.Raise(
+                    SimulationEventType.CrewStateUpdated,
+                    AlertSeverity.Advisory,
+                    $"Пересменка: {ShiftStatusLine}. {ActiveCrewLine}.",
+                    GetInfluence());
+            }
+        }
+
+        private string FormatRemainingShift()
+        {
+            float shiftDurationSeconds = Mathf.Max(60f, shiftDurationMinutes * 60f);
+            return FormatMinutesSeconds(shiftDurationSeconds - shiftClockSeconds);
+        }
+
+        private static string FormatMinutesSeconds(float seconds)
+        {
+            int totalSeconds = Mathf.CeilToInt(Mathf.Max(0f, seconds));
+            int minutes = totalSeconds / 60;
+            int remainder = totalSeconds % 60;
+            return $"{minutes:00}:{remainder:00}";
         }
 
         public CrewInfluence GetInfluence()
@@ -138,7 +302,7 @@ namespace SCADASim.Crew
                 case CrewActionType.MudCheck:
                     role = "Растворщик";
                     title = "Замер раствора";
-                    message = $"Плотность {state.MudWeightSG:0.00} SG, ECD {state.EquivalentCirculatingDensitySG:0.00} SG, газ {state.GasUnitsPercent:0.0}%.";
+                    message = $"Плотность {state.MudWeightSG:0.00} SG, эквив. плотность {state.EquivalentCirculatingDensitySG:0.00} SG, газ {state.GasUnitsPercent:0.0}%.";
                     effect = quality > 0.55f
                         ? "Замер принят, дисциплина по раствору повышена."
                         : "Замер сомнительный, возможна ошибка плотности.";
@@ -151,7 +315,7 @@ namespace SCADASim.Crew
                         {
                             Type = CrewIncidentType.WrongMudWeight,
                             Severity = AlertSeverity.Warning,
-                            Message = "Растворщик дал неуверенный замер плотности. Перепроверьте раствор перед изменением ECD.",
+                            Message = "Растворщик дал неуверенный замер плотности. Перепроверьте раствор перед изменением эквивалентной плотности.",
                             MeasuredDepth = state.MeasuredDepth,
                             Probability = 1f - quality
                         });
@@ -173,7 +337,7 @@ namespace SCADASim.Crew
                     title = "Планирование рейса";
                     message = $"Оценен износ долота {state.BitWear01 * 100f:0}% и момент {state.SurfaceTorqueKnM:0.0} кНм.";
                     effect = quality > 0.55f
-                        ? "Бригада лучше держит нагрузку и не компенсирует падение ROP агрессивными оборотами."
+                        ? "Бригада лучше держит нагрузку и не компенсирует падение скорости проходки агрессивными оборотами."
                         : "План рейса слабый, возрастает вероятность лишней нагрузки на КНБК.";
                     shiftCoordination01 = Mathf.Clamp01(shiftCoordination01 + quality * 0.14f);
                     maintenanceReadiness01 = Mathf.Clamp01(maintenanceReadiness01 + quality * 0.08f);
@@ -183,8 +347,8 @@ namespace SCADASim.Crew
                 case CrewActionType.DirectionalSurvey:
                     role = "Инженер ННБ";
                     title = "Замер инклинометрии";
-                    message = $"MD {state.MeasuredDepth:0} м, зенит {state.InclinationDegrees:0.0}°, азимут {state.AzimuthDegrees:0}°.";
-                    effect = "Улучшена ситуационная осведомленность по траектории и dogleg.";
+                    message = $"Глубина по стволу {state.MeasuredDepth:0} м, зенит {state.InclinationDegrees:0.0}°, азимут {state.AzimuthDegrees:0}°.";
+                    effect = "Улучшена ситуационная осведомленность по траектории и резкости набора угла.";
                     situationalAwareness01 = Mathf.Clamp01(situationalAwareness01 + quality * 0.18f);
                     procedureDiscipline01 = Mathf.Clamp01(procedureDiscipline01 + quality * 0.04f);
                     fatigue = Mathf.Clamp01(fatigue + 0.015f);
@@ -228,9 +392,9 @@ namespace SCADASim.Crew
                 case CrewActionType.LossControl:
                     role = "Растворщик";
                     title = "Пачка от поглощения";
-                    message = $"Проверены емкости, потери {(state.FlowRateLps - state.FlowOutLps) * 60f:0} л/мин, ECD {state.EquivalentCirculatingDensitySG:0.00} SG.";
+                    message = $"Проверены емкости, потери {(state.FlowRateLps - state.FlowOutLps) * 60f:0} л/мин, эквив. плотность {state.EquivalentCirculatingDensitySG:0.00} SG.";
                     effect = quality > 0.5f
-                        ? "Подготовлена LCM-пачка, расход снижается без резкого провала очистки."
+                        ? "Подготовлен материал от поглощения, расход снижается без резкого провала очистки."
                         : "Потери оценены грубо, есть риск недолить раствор или сорвать очистку.";
                     procedureDiscipline01 = Mathf.Clamp01(procedureDiscipline01 + quality * 0.12f);
                     shiftCoordination01 = Mathf.Clamp01(shiftCoordination01 + quality * 0.08f);
@@ -251,11 +415,11 @@ namespace SCADASim.Crew
 
                 case CrewActionType.StickSlipMitigation:
                     role = "Инженер ННБ";
-                    title = "Снижение Stick-Slip";
+                    title = "Снижение автоколебаний";
                     message = $"Момент {state.SurfaceTorqueKnM:0.0} кНм, низкочастотная вибрация {state.Vibration.LowFrequencyEnergy * 3.5f:0.0} g.";
                     effect = quality > 0.52f
                         ? "Обороты и нагрузка снижаются ступенчато, колебания должны затухнуть."
-                        : "Коррекция слишком грубая, возможно повторное возбуждение Stick-Slip.";
+                        : "Коррекция слишком грубая, возможно повторное возбуждение автоколебаний.";
                     situationalAwareness01 = Mathf.Clamp01(situationalAwareness01 + quality * 0.16f);
                     shiftCoordination01 = Mathf.Clamp01(shiftCoordination01 + quality * 0.08f);
                     fatigue = Mathf.Clamp01(fatigue + 0.022f);
@@ -264,10 +428,10 @@ namespace SCADASim.Crew
                 case CrewActionType.BackreamAndReam:
                     role = "Буровой мастер";
                     title = "Проработка ствола";
-                    message = $"Зенит {state.InclinationDegrees:0.0}°, вынос шлама {state.CuttingsTransportEfficiency01 * 100f:0}%, SPP {state.StandpipePressureBar:0.0} бар.";
+                    message = $"Зенит {state.InclinationDegrees:0.0}°, вынос шлама {state.CuttingsTransportEfficiency01 * 100f:0}%, давление насоса {state.StandpipePressureBar:0.0} бар.";
                     effect = quality > 0.5f
                         ? "Интервал проработан, шламовая постель и локальные посадки должны уменьшиться."
-                        : "Проработка неполная, повышается вероятность повторного pack-off.";
+                        : "Проработка неполная, повышается вероятность повторного сальникообразования.";
                     shiftCoordination01 = Mathf.Clamp01(shiftCoordination01 + quality * 0.12f);
                     situationalAwareness01 = Mathf.Clamp01(situationalAwareness01 + quality * 0.1f);
                     fatigue = Mathf.Clamp01(fatigue + 0.038f);
@@ -367,13 +531,6 @@ namespace SCADASim.Crew
 
         private void Update()
         {
-            fatigue = Mathf.Clamp01(fatigue + fatigueGrowthPerRealMinute * Time.deltaTime / 60f);
-            morale = Mathf.Clamp01(morale + moraleRecoveryPerRealMinute * Time.deltaTime / 60f - fatigue * 0.002f * Time.deltaTime / 60f);
-            procedureDiscipline01 = Mathf.MoveTowards(procedureDiscipline01, 0.52f, Time.deltaTime * 0.002f / 60f);
-            situationalAwareness01 = Mathf.MoveTowards(situationalAwareness01, 0.5f, Time.deltaTime * 0.003f / 60f);
-            maintenanceReadiness01 = Mathf.MoveTowards(maintenanceReadiness01, 0.56f, Time.deltaTime * 0.0015f / 60f);
-            shiftCoordination01 = Mathf.MoveTowards(shiftCoordination01, 0.54f, Time.deltaTime * 0.0025f / 60f);
-
             ExecutePendingCommands();
             RollForOperationalIncident();
 
@@ -515,6 +672,50 @@ namespace SCADASim.Crew
                 incident.Severity,
                 incident.Message,
                 incident);
+        }
+
+        private readonly struct CrewShiftProfile
+        {
+            public readonly string Name;
+            public readonly string Driller;
+            public readonly string Toolpusher;
+            public readonly string MudEngineer;
+            public readonly string DirectionalEngineer;
+            public readonly float ExperienceOffset;
+            public readonly float FatigueOffset;
+            public readonly float MoraleOffset;
+            public readonly float DisciplineOffset;
+            public readonly float AwarenessOffset;
+            public readonly float MaintenanceOffset;
+            public readonly float CoordinationOffset;
+
+            public CrewShiftProfile(
+                string name,
+                string driller,
+                string toolpusher,
+                string mudEngineer,
+                string directionalEngineer,
+                float experienceOffset,
+                float fatigueOffset,
+                float moraleOffset,
+                float disciplineOffset,
+                float awarenessOffset,
+                float maintenanceOffset,
+                float coordinationOffset)
+            {
+                Name = name;
+                Driller = driller;
+                Toolpusher = toolpusher;
+                MudEngineer = mudEngineer;
+                DirectionalEngineer = directionalEngineer;
+                ExperienceOffset = experienceOffset;
+                FatigueOffset = fatigueOffset;
+                MoraleOffset = moraleOffset;
+                DisciplineOffset = disciplineOffset;
+                AwarenessOffset = awarenessOffset;
+                MaintenanceOffset = maintenanceOffset;
+                CoordinationOffset = coordinationOffset;
+            }
         }
 
         private sealed class PendingCrewCommand

@@ -116,6 +116,9 @@ namespace SCADASim.Core
         HoleCleaning,
         ShaleStability,
         BitAssessment,
+        PressureWindow,
+        CrewHandover,
+        PumpEfficiency,
         ShiftPlan
     }
 

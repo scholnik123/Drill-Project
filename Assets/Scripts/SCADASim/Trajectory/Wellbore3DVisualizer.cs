@@ -16,10 +16,15 @@ namespace SCADASim.Trajectory
         private Transform stationRoot;
         private Transform collarRoot;
         private Transform bitMarker;
+        private Transform bitDirection;
         private Transform riskHalo;
+        private Transform referencePlane;
+        private TextMesh bitTelemetryLabel;
         private Material stationMaterial;
         private Material collarMaterial;
         private Material bitMaterial;
+        private Material directionMaterial;
+        private Material referenceMaterial;
         private Material lowRiskMaterial;
         private Material mediumRiskMaterial;
         private Material highRiskMaterial;
@@ -86,6 +91,8 @@ namespace SCADASim.Trajectory
             stationMaterial ??= MakeMaterial("Station Marker", new Color(0.06f, 0.06f, 0.055f));
             collarMaterial ??= MakeMaterial("Casing Collar", new Color(0.8f, 0.82f, 0.78f));
             bitMaterial ??= MakeMaterial("Bit Marker", new Color(0.86f, 0.02f, 0.08f));
+            directionMaterial ??= MakeMaterial("Bit Direction", new Color(0.08f, 0.22f, 0.9f, 0.86f));
+            referenceMaterial ??= MakeMaterial("Wellhead Reference Plane", new Color(0.08f, 0.08f, 0.075f, 0.16f));
             lowRiskMaterial ??= MakeMaterial("Risk Low", new Color(0.1f, 0.55f, 0.28f, 0.72f));
             mediumRiskMaterial ??= MakeMaterial("Risk Medium", new Color(0.95f, 0.63f, 0.08f, 0.72f));
             highRiskMaterial ??= MakeMaterial("Risk High", new Color(0.86f, 0.02f, 0.08f, 0.78f));
@@ -100,6 +107,15 @@ namespace SCADASim.Trajectory
                 bitMarker = marker.transform;
             }
 
+            if (bitDirection == null)
+            {
+                GameObject direction = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                direction.name = "Current Bit Direction";
+                direction.transform.SetParent(transform, false);
+                direction.GetComponent<Renderer>().sharedMaterial = directionMaterial;
+                bitDirection = direction.transform;
+            }
+
             if (riskHalo == null)
             {
                 GameObject halo = GameObject.CreatePrimitive(PrimitiveType.Sphere);
@@ -107,6 +123,26 @@ namespace SCADASim.Trajectory
                 halo.transform.SetParent(transform, false);
                 halo.GetComponent<Renderer>().sharedMaterial = lowRiskMaterial;
                 riskHalo = halo.transform;
+            }
+
+            if (referencePlane == null)
+            {
+                GameObject plane = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                plane.name = "Wellhead Reference Plane";
+                plane.transform.SetParent(transform, false);
+                plane.GetComponent<Renderer>().sharedMaterial = referenceMaterial;
+                referencePlane = plane.transform;
+            }
+
+            if (bitTelemetryLabel == null)
+            {
+                GameObject labelObject = new GameObject("Current Bit Telemetry Label");
+                labelObject.transform.SetParent(transform, false);
+                bitTelemetryLabel = labelObject.AddComponent<TextMesh>();
+                bitTelemetryLabel.characterSize = 0.22f;
+                bitTelemetryLabel.anchor = TextAnchor.MiddleLeft;
+                bitTelemetryLabel.alignment = TextAlignment.Left;
+                bitTelemetryLabel.color = Color.black;
             }
         }
 
@@ -160,18 +196,18 @@ namespace SCADASim.Trajectory
             Vector3 position = wellbore.transform.TransformPoint(sample.Position);
 
             GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            marker.name = $"MD {sample.MeasuredDepth:0} Marker";
+            marker.name = $"Measured Depth {sample.MeasuredDepth:0} Marker";
             marker.transform.SetParent(stationRoot, true);
             marker.transform.position = position;
             marker.transform.localScale = Vector3.one * 0.22f;
             marker.GetComponent<Renderer>().sharedMaterial = stationMaterial;
 
-            GameObject labelObject = new GameObject($"MD {sample.MeasuredDepth:0} Label");
+            GameObject labelObject = new GameObject($"Measured Depth {sample.MeasuredDepth:0} Label");
             labelObject.transform.SetParent(stationRoot, true);
             labelObject.transform.position = position + Vector3.up * 0.55f;
 
             TextMesh label = labelObject.AddComponent<TextMesh>();
-            label.text = $"MD {sample.MeasuredDepth:0} м\nзенит {sample.InclinationDegrees:0}°";
+            label.text = $"Ствол {sample.MeasuredDepth:0} м\nзенит {sample.InclinationDegrees:0}°";
             label.characterSize = 0.23f;
             label.anchor = TextAnchor.MiddleCenter;
             label.alignment = TextAlignment.Center;
@@ -186,7 +222,7 @@ namespace SCADASim.Trajectory
             Vector3 tangent = wellbore.transform.TransformDirection(sample.Tangent).normalized;
 
             GameObject collar = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            collar.name = $"Casing Collar MD {sample.MeasuredDepth:0}";
+            collar.name = $"Casing Collar Measured Depth {sample.MeasuredDepth:0}";
             collar.transform.SetParent(collarRoot, true);
             collar.transform.position = position;
             collar.transform.rotation = Quaternion.FromToRotation(Vector3.up, tangent);
@@ -212,9 +248,17 @@ namespace SCADASim.Trajectory
             }
 
             Vector3 position = wellbore.transform.TransformPoint(sample.Position);
+            Vector3 tangent = wellbore.transform.TransformDirection(sample.Tangent).normalized;
             bitMarker.position = position;
             bitMarker.localScale = Vector3.one * 0.62f;
             bitMarker.Rotate(Vector3.up, 145f * Time.deltaTime, Space.Self);
+
+            if (bitDirection != null)
+            {
+                bitDirection.position = position + tangent * 0.62f;
+                bitDirection.rotation = Quaternion.FromToRotation(Vector3.up, tangent);
+                bitDirection.localScale = new Vector3(0.1f, 0.62f, 0.1f);
+            }
 
             float risk = Mathf.Max(
                 state.StuckPipeRisk01,
@@ -234,6 +278,20 @@ namespace SCADASim.Trajectory
                     : risk > 0.42f
                         ? mediumRiskMaterial
                         : lowRiskMaterial;
+            }
+
+            if (referencePlane != null)
+            {
+                Vector3 wellhead = wellbore.transform.TransformPoint(Vector3.zero);
+                referencePlane.position = wellhead + Vector3.down * 0.02f;
+                referencePlane.rotation = Quaternion.identity;
+                referencePlane.localScale = new Vector3(18f, 0.02f, 18f);
+            }
+
+            if (bitTelemetryLabel != null)
+            {
+                bitTelemetryLabel.transform.position = position + Vector3.up * 0.85f + Vector3.right * 0.3f;
+                bitTelemetryLabel.text = $"ДОЛОТО\nпо стволу {state.MeasuredDepth:0} м\nпо вертикали {state.TrueVerticalDepth:0} м\nзенит {state.InclinationDegrees:0.0}°\nриск {risk * 100f:0}%";
             }
 
             UpdateCasingCollarVisibility(state.MeasuredDepth);
@@ -287,6 +345,11 @@ namespace SCADASim.Trajectory
                 }
 
                 label.rotation = Quaternion.LookRotation(label.position - camera.transform.position, Vector3.up);
+            }
+
+            if (bitTelemetryLabel != null)
+            {
+                bitTelemetryLabel.transform.rotation = Quaternion.LookRotation(bitTelemetryLabel.transform.position - camera.transform.position, Vector3.up);
             }
         }
 
