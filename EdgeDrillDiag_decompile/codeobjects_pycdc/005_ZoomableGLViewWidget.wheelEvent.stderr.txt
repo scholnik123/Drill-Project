@@ -1,0 +1,1 @@
+Unsupported opcode: COPY_FREE_VARS (227)
