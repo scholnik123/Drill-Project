@@ -24,6 +24,14 @@ namespace SCADASim.UI
         private static readonly Color GraphGreen = new Color(0.13f, 0.55f, 0.32f);
         private static readonly Color GraphBlue = new Color(0.26f, 0.52f, 1f);
         private static readonly Color GraphBlack = new Color(0.05f, 0.05f, 0.05f);
+        private static readonly GraphAxisScale TorqueScale = new GraphAxisScale("МОМЕНТ, кНм", 0f, 65f);
+        private static readonly GraphAxisScale VibrationScale = new GraphAxisScale("ВИБР., %", 0f, 100f);
+        private static readonly GraphAxisScale StandpipePressureScale = new GraphAxisScale("ДАВЛ., бар", 0f, 360f);
+        private static readonly GraphAxisScale FlowBalanceScale = new GraphAxisScale("БАЛАНС, л/мин", -600f, 600f);
+        private static readonly GraphAxisScale RopScale = new GraphAxisScale("ROP, м/ч", 0f, 45f);
+        private static readonly GraphAxisScale RiskPercentScale = new GraphAxisScale("РИСК, %", 0f, 100f);
+        private static readonly GraphAxisScale BottomHolePressureScale = new GraphAxisScale("ЗАБОЙ, МПа", 0f, 80f);
+        private static readonly GraphAxisScale PorePressureScale = new GraphAxisScale("ПЛАСТ, МПа", 0f, 80f);
 
         private readonly List<string> locationChoices = new List<string>
         {
@@ -579,9 +587,9 @@ namespace SCADASim.UI
             left.AddToClassList("telemetry-left");
             page.Add(left);
 
-            rotationGraph = AddGraphPanel(left, "ВРАЩЕНИЕ / МОМЕНТ", GraphRed, GraphBlack, "МОМЕНТ", "ВИБР.");
-            hydraulicGraph = AddGraphPanel(left, "ГИДРАВЛИКА / ЕМКОСТИ", GraphGreen, GraphBlack, "ДАВЛ.", "ПОТОК");
-            bottomGraph = AddGraphPanel(left, "ЗАБОЙНЫЕ ПАРАМЕТРЫ", GraphBlue, GraphRed, "М/Ч", "ИЗНОС");
+            rotationGraph = AddGraphPanel(left, "ВРАЩЕНИЕ / МОМЕНТ", GraphRed, GraphBlack, TorqueScale, VibrationScale);
+            hydraulicGraph = AddGraphPanel(left, "ГИДРАВЛИКА / ЕМКОСТИ", GraphGreen, GraphBlack, StandpipePressureScale, FlowBalanceScale);
+            bottomGraph = AddGraphPanel(left, "ЗАБОЙНЫЕ ПАРАМЕТРЫ", GraphBlue, GraphRed, RopScale, RiskPercentScale);
 
             VisualElement center = new VisualElement();
             center.AddToClassList("telemetry-center");
@@ -611,7 +619,7 @@ namespace SCADASim.UI
             pressurePoreValue = CreatePressureNumber(pressureNumbers, "ПЛАСТОВОЕ (МПа)");
             pressureBottomValue = CreatePressureNumber(pressureNumbers, "ЗАБОЙНОЕ (МПа)");
             pressureGradientValue = CreatePressureNumber(pressureNumbers, "ГРП (МПа)");
-            pressureGraph = new TrendGraphElement(GraphRed, GraphBlack, "ЗАБОЙ", "ПОР.");
+            pressureGraph = new TrendGraphElement(GraphRed, GraphBlack, BottomHolePressureScale, PorePressureScale);
             pressureGraph.AddToClassList("pressure-graph");
             pressurePanel.Add(pressureGraph);
             depthValue = AddStatusBox(pressurePanel, "ГЛУБИНА: 0 МЕТРОВ");
@@ -693,11 +701,11 @@ namespace SCADASim.UI
             aiAssistantImage.image = aiAssistantPortrait != null ? aiAssistantPortrait.PortraitTexture : null;
             assistantRow.Add(aiAssistantImage);
 
-            aiAssistantCaption = new Label("ИИ-АССИСТЕНТ: онлайн. Мониторинг давления, вибрации, расхода и действий бригады.");
+            aiAssistantCaption = new Label("ИИ-МОДУЛЬ: онлайн. Оценивает давление, вибрацию, расход и действия бригады.");
             aiAssistantCaption.AddToClassList("ai-assistant-caption");
             assistantRow.Add(aiAssistantCaption);
 
-            aiRecommendationValue = AddStatusBox(aiPanel, "СИСТЕМЫ В НОРМЕ. ECD: 1.10 SG. ОЧИСТКА: 100%.");
+            aiRecommendationValue = AddStatusBox(aiPanel, "МОНИТОРИНГ: отклонений нет. Действие: продолжать текущий режим.");
             supervisorTaskValue = AddStatusBox(aiPanel, "ЗАДАЧА: ожидание распоряжения бурового мастера.");
             taskEconomyValue = AddStatusBox(aiPanel, "БЮДЖЕТ СМЕНЫ: 0 CR // УСПЕХ 0 // ПРОВАЛ 0.");
             incidentConsequenceValue = AddStatusBox(aiPanel, "ПОСЛЕДСТВИЯ: НПВ 0 мин // ПРИТОК 0% // ПОГЛОЩЕНИЕ 0%.");
@@ -927,8 +935,8 @@ namespace SCADASim.UI
                 if (aiAssistantCaption != null)
                 {
                     aiAssistantCaption.text = aiAssistantPortrait.HasAssistantModel
-                        ? "ИИ-АССИСТЕНТ: онлайн. Анализирует давление, вибрацию, расход и бригаду."
-                        : "ИИ-АССИСТЕНТ: онлайн. Модель не найдена, используется резервный портрет.";
+                        ? "ИИ-МОДУЛЬ: онлайн. Анализ трендов в реальном времени."
+                        : "ИИ-МОДУЛЬ: онлайн. Работает резервная визуализация.";
                 }
             }
 
@@ -944,7 +952,7 @@ namespace SCADASim.UI
 
             if (state.Vibration.LowFrequencyEnergy > 0.58f && state.InclinationDegrees > 70f && crew.Fatigue > 0.5f)
             {
-                aiRecommendationValue.text = "УГРОЗА STICK-SLIP. БРИГАДА РЕАГИРУЕТ МЕДЛЕННО. РЕКОМЕНДУЕТСЯ СНИЗИТЬ ОБОРОТЫ.";
+                aiRecommendationValue.text = "РЕКОМЕНДАЦИЯ ИИ: риск stick-slip. Действие: плавно снизить RPM на 10-15% и стабилизировать WOB.";
             }
         }
 
@@ -952,7 +960,7 @@ namespace SCADASim.UI
         {
             if (simulationEvent.Type == SimulationEventType.EdgeAIAlert && simulationEvent.Payload is AIRecommendation recommendation)
             {
-                aiRecommendationValue.text = CompactStatus($"{recommendation.Title.ToUpperInvariant()}: {recommendation.Message} {recommendation.RecommendedAction}", 190);
+                aiRecommendationValue.text = FormatAIRecommendation(recommendation);
                 return;
             }
 
@@ -1525,57 +1533,31 @@ namespace SCADASim.UI
             return button;
         }
 
-        private static TrendGraphElement AddGraphPanel(VisualElement parent, string title, Color primary, Color secondary, string pName = "", string sName = "")
+        private static TrendGraphElement AddGraphPanel(
+            VisualElement parent,
+            string title,
+            Color primary,
+            Color secondary,
+            GraphAxisScale primaryScale,
+            GraphAxisScale secondaryScale)
         {
             VisualElement panel = CreateScadaPanel(title);
             panel.AddToClassList("graph-panel");
             parent.Add(panel);
 
-            // Container for graph and its labels
             VisualElement graphContainer = new VisualElement();
+            graphContainer.AddToClassList("graph-container");
             graphContainer.style.flexGrow = 1;
-            graphContainer.style.overflow = Overflow.Visible;
             panel.Add(graphContainer);
  
-            TrendGraphElement graph = new TrendGraphElement(primary, secondary);
+            TrendGraphElement graph = new TrendGraphElement(primary, secondary, primaryScale, secondaryScale);
+            graph.AddToClassList("trend-graph-light");
             graph.style.position = Position.Absolute;
             graph.style.width = new Length(100, LengthUnit.Percent);
             graph.style.height = new Length(100, LengthUnit.Percent);
             graphContainer.Add(graph);
 
-            // Static Labels on Container
-            CreateAxisLabel(graphContainer, pName, primary, 2, 40, -90);
-            CreateAxisLabel(graphContainer, sName, secondary, 92, 40, 90);
-            CreateAxisLabel(graphContainer, "ВРЕМЯ", Color.black, 45, 90, 0);
-
             return graph;
-        }
-
-        private static void CreateAxisLabel(VisualElement parent, string text, Color color, float leftPercent, float topPercent, float rotate)
-        {
-            if (string.IsNullOrEmpty(text)) return;
-            Label label = new Label(text);
-            label.style.position = Position.Absolute;
-            label.style.left = new Length(leftPercent, LengthUnit.Percent);
-            label.style.top = new Length(topPercent, LengthUnit.Percent);
-            label.style.color = color;
-            label.style.fontSize = 13;
-            label.style.unityFontStyleAndWeight = FontStyle.Bold;
-            label.style.backgroundColor = Color.white;
-            label.style.borderBottomColor = Color.black;
-            label.style.borderBottomWidth = 1;
-            label.style.borderTopColor = Color.black;
-            label.style.borderTopWidth = 1;
-            label.style.borderLeftColor = Color.black;
-            label.style.borderLeftWidth = 1;
-            label.style.borderRightColor = Color.black;
-            label.style.borderRightWidth = 1;
-            label.style.paddingLeft = 4;
-            label.style.paddingRight = 4;
-            label.style.rotate = new Rotate(Angle.Degrees(rotate));
-            label.pickingMode = PickingMode.Ignore;
-            parent.Add(label);
-            label.BringToFront();
         }
 
         private static WellboreProfileType ResolveProfile(int index)
@@ -1772,6 +1754,18 @@ namespace SCADASim.UI
             }
         }
 
+        private static string FormatAIRecommendation(AIRecommendation recommendation)
+        {
+            string severity = recommendation.Severity == AlertSeverity.Critical ? "критический риск" : "предупреждение";
+            string action = recommendation.RecommendedAction.Trim();
+            if (!action.EndsWith("."))
+            {
+                action += ".";
+            }
+
+            return CompactStatus($"ИИ: {severity}. {recommendation.Title}. Действие: {action}", 155);
+        }
+
         private static string CompactStatus(string text, int maxCharacters)
         {
             if (string.IsNullOrEmpty(text) || text.Length <= maxCharacters)
@@ -1813,6 +1807,7 @@ namespace SCADASim.UI
 
         private sealed class KnobControlElement : VisualElement
         {
+            private const float DragPixelsForFullRange = 340f;
             private readonly float min;
             private readonly float max;
             private readonly float step;
@@ -1836,6 +1831,7 @@ namespace SCADASim.UI
                 RegisterCallback<PointerUpEvent>(OnPointerUp);
                 RegisterCallback<PointerCancelEvent>(OnPointerCancel);
                 RegisterCallback<WheelEvent>(OnWheel);
+                RegisterCallback<KeyDownEvent>(OnKeyDown);
                 generateVisualContent += Draw;
             }
 
@@ -1866,9 +1862,16 @@ namespace SCADASim.UI
 
             private void OnPointerDown(PointerDownEvent evt)
             {
+                if (evt.button != 0)
+                {
+                    return;
+                }
+
                 IsDragging = true;
                 dragStartPosition = (Vector2)evt.position;
                 dragStartValue = value;
+                Focus();
+                MarkDirtyRepaint();
                 evt.StopPropagation();
             }
 
@@ -1881,7 +1884,7 @@ namespace SCADASim.UI
 
                 Vector2 delta = (Vector2)evt.position - dragStartPosition;
                 float range = max - min;
-                float normalizedDelta = (delta.x - delta.y) / 230f;
+                float normalizedDelta = (delta.x * 0.6f - delta.y) / DragPixelsForFullRange;
                 SetValue(dragStartValue + normalizedDelta * range);
                 evt.StopPropagation();
             }
@@ -1900,13 +1903,54 @@ namespace SCADASim.UI
 
             private void OnWheel(WheelEvent evt)
             {
-                SetValue(value - evt.delta.y * step);
+                float wheelSteps = Mathf.Clamp(evt.delta.y, -3f, 3f);
+                SetValue(value - wheelSteps * step);
                 evt.StopPropagation();
+            }
+
+            private void OnKeyDown(KeyDownEvent evt)
+            {
+                float delta = 0f;
+                if (evt.keyCode == KeyCode.LeftArrow || evt.keyCode == KeyCode.DownArrow)
+                {
+                    delta = -step;
+                }
+                else if (evt.keyCode == KeyCode.RightArrow || evt.keyCode == KeyCode.UpArrow)
+                {
+                    delta = step;
+                }
+                else if (evt.keyCode == KeyCode.PageDown)
+                {
+                    delta = -step * 5f;
+                }
+                else if (evt.keyCode == KeyCode.PageUp)
+                {
+                    delta = step * 5f;
+                }
+                else if (evt.keyCode == KeyCode.Home)
+                {
+                    SetValue(min);
+                    evt.StopPropagation();
+                    return;
+                }
+                else if (evt.keyCode == KeyCode.End)
+                {
+                    SetValue(max);
+                    evt.StopPropagation();
+                    return;
+                }
+
+                if (!Mathf.Approximately(delta, 0f))
+                {
+                    SetValue(value + delta);
+                    evt.StopPropagation();
+                }
             }
 
             private void EndDrag(int pointerId)
             {
                 IsDragging = false;
+                MarkDirtyRepaint();
             }
 
             private void Draw(MeshGenerationContext context)
@@ -1919,10 +1963,10 @@ namespace SCADASim.UI
                 float angle = Mathf.Lerp(-135f, 135f, normalized) * Mathf.Deg2Rad;
 
                 Painter2D painter = context.painter2D;
-                DrawPolygon(painter, center, radius, 44, new Color(0.06f, 0.06f, 0.06f));
+                DrawPolygon(painter, center, radius, 44, IsDragging ? new Color(0.1f, 0.1f, 0.09f) : new Color(0.06f, 0.06f, 0.06f));
                 DrawPolygon(painter, center, innerRadius, 44, new Color(0.86f, 0.84f, 0.78f));
 
-                painter.lineWidth = 3f;
+                painter.lineWidth = IsDragging ? 4f : 3f;
                 painter.strokeColor = new Color(0.86f, 0.02f, 0.08f);
                 painter.BeginPath();
                 bool first = true;
@@ -1944,7 +1988,7 @@ namespace SCADASim.UI
                 }
                 painter.Stroke();
 
-                painter.lineWidth = 3f;
+                painter.lineWidth = IsDragging ? 4f : 3f;
                 painter.strokeColor = Color.black;
                 painter.BeginPath();
                 painter.MoveTo(center);
@@ -1975,57 +2019,140 @@ namespace SCADASim.UI
             }
         }
 
+        private struct GraphAxisScale
+        {
+            public readonly string Title;
+            public readonly float DefaultMin;
+            public readonly float DefaultMax;
+
+            public GraphAxisScale(string title, float defaultMin, float defaultMax)
+            {
+                Title = title;
+                DefaultMin = Mathf.Min(defaultMin, defaultMax);
+                DefaultMax = Mathf.Max(defaultMin, defaultMax);
+            }
+
+            public void GetRange(List<float> values, out float min, out float max)
+            {
+                min = DefaultMin;
+                max = DefaultMax;
+
+                if (values != null)
+                {
+                    for (int i = 0; i < values.Count; i++)
+                    {
+                        min = Mathf.Min(min, values[i]);
+                        max = Mathf.Max(max, values[i]);
+                    }
+                }
+
+                if (Mathf.Approximately(min, max))
+                {
+                    float padding = Mathf.Max(Mathf.Abs(min) * 0.05f, 1f);
+                    min -= padding;
+                    max += padding;
+                    return;
+                }
+
+                float range = max - min;
+                float edgePadding = Mathf.Max(range * 0.04f, 0.001f);
+                if (min < DefaultMin)
+                {
+                    min -= edgePadding;
+                }
+
+                if (max > DefaultMax)
+                {
+                    max += edgePadding;
+                }
+            }
+        }
+
         private sealed class TrendGraphElement : VisualElement
         {
             private const int Capacity = 180;
+            private const float PlotLeftPadding = 48f;
+            private const float PlotRightPadding = 48f;
+            private const float PlotTopPadding = 16f;
+            private const float PlotBottomPadding = 24f;
+
             private readonly List<float> primary = new List<float>(Capacity);
             private readonly List<float> secondary = new List<float>(Capacity);
             private readonly Color primaryColor;
             private readonly Color secondaryColor;
+            private readonly GraphAxisScale primaryScale;
+            private readonly GraphAxisScale secondaryScale;
+            private readonly Label primaryMaxLabel;
+            private readonly Label primaryMinLabel;
+            private readonly Label secondaryMaxLabel;
+            private readonly Label secondaryMinLabel;
 
-            public TrendGraphElement(Color primaryColor, Color secondaryColor)
+            public TrendGraphElement(
+                Color primaryColor,
+                Color secondaryColor,
+                GraphAxisScale primaryScale,
+                GraphAxisScale secondaryScale)
             {
                 this.primaryColor = primaryColor;
                 this.secondaryColor = secondaryColor;
+                this.primaryScale = primaryScale;
+                this.secondaryScale = secondaryScale;
+                usageHints = UsageHints.DynamicTransform;
+
+                primaryMaxLabel = CreateGraphLabel("graph-label-primary-max", primaryColor);
+                primaryMinLabel = CreateGraphLabel("graph-label-primary-min", primaryColor);
+                secondaryMaxLabel = CreateGraphLabel("graph-label-secondary-max", secondaryColor);
+                secondaryMinLabel = CreateGraphLabel("graph-label-secondary-min", secondaryColor);
+                CreateAxisTitle(primaryScale.Title, "graph-axis-title-left", primaryColor);
+                CreateAxisTitle(secondaryScale.Title, "graph-axis-title-right", secondaryColor);
+                CreateAxisTitle("ВРЕМЯ, 27 С", "graph-axis-title-bottom", GraphBlack);
+
+                UpdateLabels();
                 generateVisualContent += Draw;
-                usageHints = UsageHints.DynamicHierarchy;
             }
 
             public void Push(float primaryValue, float secondaryValue)
             {
                 PushValue(primary, primaryValue);
                 PushValue(secondary, secondaryValue);
+                UpdateLabels();
                 MarkDirtyRepaint();
+            }
+
+            private Label CreateGraphLabel(string className, Color color)
+            {
+                Label label = new Label();
+                label.AddToClassList("graph-label");
+                label.AddToClassList(className);
+                label.style.color = color;
+                label.pickingMode = PickingMode.Ignore;
+                Add(label);
+                label.BringToFront();
+                return label;
+            }
+
+            private void CreateAxisTitle(string text, string className, Color color)
+            {
+                Label label = new Label(text);
+                label.AddToClassList("graph-axis-title");
+                label.AddToClassList(className);
+                label.style.color = color;
+                label.pickingMode = PickingMode.Ignore;
+                Add(label);
+                label.BringToFront();
             }
 
             private void UpdateLabels()
             {
-                UpdateLabelRange(primary, primaryMaxLabel, primaryMinLabel);
-                UpdateLabelRange(secondary, secondaryMaxLabel, secondaryMinLabel);
+                UpdateLabelRange(primary, primaryScale, primaryMaxLabel, primaryMinLabel);
+                UpdateLabelRange(secondary, secondaryScale, secondaryMaxLabel, secondaryMinLabel);
             }
 
-            private void UpdateLabelRange(List<float> values, Label maxLabel, Label minLabel)
+            private static void UpdateLabelRange(List<float> values, GraphAxisScale scale, Label maxLabel, Label minLabel)
             {
-                if (values.Count == 0) return;
-
-                float min = float.PositiveInfinity;
-                float max = float.NegativeInfinity;
-                for (int i = 0; i < values.Count; i++)
-                {
-                    min = Mathf.Min(min, values[i]);
-                    max = Mathf.Max(max, values[i]);
-                }
-
-                if (float.IsInfinity(min) || float.IsInfinity(max))
-                {
-                    maxLabel.text = "";
-                    minLabel.text = "";
-                }
-                else
-                {
-                    maxLabel.text = FormatValue(max);
-                    minLabel.text = FormatValue(min);
-                }
+                scale.GetRange(values, out float min, out float max);
+                maxLabel.text = FormatValue(max);
+                minLabel.text = FormatValue(min);
             }
 
             private static string FormatValue(float val)
@@ -2052,16 +2179,30 @@ namespace SCADASim.UI
                     return;
                 }
 
+                Rect plotRect = GetPlotRect(rect);
                 Painter2D painter = context.painter2D;
-                DrawGrid(painter, rect);
-                DrawSeries(painter, rect, secondary, secondaryColor, 1.4f);
-                DrawSeries(painter, rect, primary, primaryColor, 2.4f);
+                DrawGrid(painter, plotRect);
+                DrawSeries(painter, plotRect, secondary, secondaryColor, 1.5f, secondaryScale);
+                DrawSeries(painter, plotRect, primary, primaryColor, 2.5f, primaryScale);
+            }
+
+            private static Rect GetPlotRect(Rect rect)
+            {
+                float leftPadding = Mathf.Min(PlotLeftPadding, rect.width * 0.2f);
+                float rightPadding = Mathf.Min(PlotRightPadding, rect.width * 0.2f);
+                float topPadding = Mathf.Min(PlotTopPadding, rect.height * 0.22f);
+                float bottomPadding = Mathf.Min(PlotBottomPadding, rect.height * 0.28f);
+                return new Rect(
+                    rect.xMin + leftPadding,
+                    rect.yMin + topPadding,
+                    Mathf.Max(4f, rect.width - leftPadding - rightPadding),
+                    Mathf.Max(4f, rect.height - topPadding - bottomPadding));
             }
 
             private static void DrawGrid(Painter2D painter, Rect rect)
             {
                 painter.lineWidth = 1f;
-                painter.strokeColor = new Color(0.18f, 0.18f, 0.16f, 0.24f);
+                painter.strokeColor = new Color(0.18f, 0.18f, 0.16f, 0.2f);
 
                 for (int i = 1; i < 5; i++)
                 {
@@ -2081,29 +2222,39 @@ namespace SCADASim.UI
                     painter.Stroke();
                 }
 
-                painter.lineWidth = 1.4f;
+                painter.lineWidth = 1.5f;
                 painter.strokeColor = new Color(0.05f, 0.05f, 0.05f, 0.82f);
                 painter.BeginPath();
-                painter.MoveTo(new Vector2(rect.xMin, rect.yMax - 1f));
-                painter.LineTo(new Vector2(rect.xMax, rect.yMax - 1f));
+                painter.MoveTo(new Vector2(rect.xMin, rect.yMin));
+                painter.LineTo(new Vector2(rect.xMin, rect.yMax));
+                painter.LineTo(new Vector2(rect.xMax, rect.yMax));
+                painter.LineTo(new Vector2(rect.xMax, rect.yMin));
                 painter.Stroke();
             }
 
-            private static void DrawSeries(Painter2D painter, Rect rect, List<float> values, Color color, float width)
+            private static void DrawSeries(
+                Painter2D painter,
+                Rect rect,
+                List<float> values,
+                Color color,
+                float width,
+                GraphAxisScale scale)
             {
                 if (values.Count < 2)
                 {
                     return;
                 }
 
+                scale.GetRange(values, out float min, out float max);
                 painter.lineWidth = width;
                 painter.strokeColor = color;
                 painter.BeginPath();
 
                 for (int i = 0; i < values.Count; i++)
                 {
-                    float x = Mathf.Lerp(rect.xMin + 8f, rect.xMax - 8f, i / (float)Mathf.Max(1, values.Count - 1));
-                    float y = Mathf.Lerp(rect.yMax - 10f, rect.yMin + 10f, NormalizeToRecentRange(values, values[i]));
+                    float x = Mathf.Lerp(rect.xMin, rect.xMax, i / (float)Mathf.Max(1, values.Count - 1));
+                    float normalized = Mathf.Clamp01(Mathf.InverseLerp(min, max, values[i]));
+                    float y = Mathf.Lerp(rect.yMax, rect.yMin, normalized);
                     Vector2 point = new Vector2(x, y);
 
                     if (i == 0)
@@ -2117,33 +2268,6 @@ namespace SCADASim.UI
                 }
 
                 painter.Stroke();
-            }
-
-            private static float NormalizeToRecentRange(List<float> values, float value)
-            {
-                float min = float.PositiveInfinity;
-                float max = float.NegativeInfinity;
-                for (int i = 0; i < values.Count; i++)
-                {
-                    min = Mathf.Min(min, values[i]);
-                    max = Mathf.Max(max, values[i]);
-                }
-
-                if (float.IsInfinity(min) || float.IsInfinity(max))
-                {
-                    return 0.5f;
-                }
-
-                float center = (min + max) * 0.5f;
-                float range = max - min;
-                float minimumRange = Mathf.Max(Mathf.Abs(center) * 0.035f, 0.35f);
-                if (range < minimumRange)
-                {
-                    min = center - minimumRange * 0.5f;
-                    max = center + minimumRange * 0.5f;
-                }
-
-                return Mathf.Clamp01(Mathf.InverseLerp(min, max, value));
             }
         }
 

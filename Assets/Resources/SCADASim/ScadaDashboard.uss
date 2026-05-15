@@ -315,6 +315,12 @@
     height: 190px;
 }
 
+.graph-container {
+    position: relative;
+    flex-grow: 1;
+    overflow: visible;
+}
+
 .trend-graph-light {
     flex-grow: 1;
     background-color: #e9e6de;
@@ -323,14 +329,15 @@
     border-left-width: 1px;
     border-right-width: 1px;
     border-color: rgba(17, 17, 17, 0.18);
+    overflow: visible;
 }
 
 .graph-label {
     position: absolute;
-    font-size: 12px;
+    font-size: 10px;
     -unity-font-style: bold;
-    padding: 2px 4px;
-    background-color: #ffffff;
+    padding: 1px 3px;
+    background-color: rgba(255, 255, 255, 0.86);
     border-width: 1px;
     border-color: #000000;
     color: #000000;
@@ -338,9 +345,9 @@
 }
 
 .graph-label-primary-max { left: 8px; top: 8px; }
-.graph-label-primary-min { left: 8px; bottom: 30px; }
+.graph-label-primary-min { left: 8px; bottom: 22px; }
 .graph-label-secondary-max { right: 8px; top: 8px; }
-.graph-label-secondary-min { right: 8px; bottom: 30px; }
+.graph-label-secondary-min { right: 8px; bottom: 22px; }
 
 .graph-label-x-start { left: 8px; bottom: 8px; border-width: 0; background-color: transparent; }
 .graph-label-x-end { right: 8px; bottom: 8px; border-width: 0; background-color: transparent; }
@@ -358,9 +365,9 @@
     -unity-text-align: middle-center;
 }
 
-.graph-axis-title-left { left: 5px; top: 40%; width: 100px; rotate: -90deg; }
-.graph-axis-title-right { right: 5px; top: 40%; width: 100px; rotate: 90deg; }
-.graph-axis-title-bottom { left: 45%; bottom: 6px; width: 60px; }
+.graph-axis-title-left { left: -24px; top: 43%; width: 112px; rotate: -90deg; }
+.graph-axis-title-right { right: -24px; top: 43%; width: 112px; rotate: 90deg; }
+.graph-axis-title-bottom { left: 42%; bottom: 4px; width: 92px; }
 
 .env-title-row {
     flex-direction: row;
@@ -441,6 +448,7 @@
     border-left-width: 1px;
     border-right-width: 1px;
     border-color: rgba(17, 17, 17, 0.18);
+    overflow: visible;
 }
 
 .crew-action-grid {
@@ -501,7 +509,7 @@
 }
 
 .control-panel {
-    height: 216px;
+    height: 258px;
 }
 
 .control-row {
@@ -523,27 +531,27 @@
 }
 
 .knob-row {
-    height: 24px;
+    height: 32px;
     flex-direction: row;
     align-items: center;
 }
 
 .knob-label {
-    width: 118px;
-    font-size: 10px;
+    width: 124px;
+    font-size: 11px;
 }
 
 .knob-control {
-    width: 23px;
-    height: 23px;
-    margin-right: 8px;
+    width: 34px;
+    height: 34px;
+    margin-right: 10px;
     flex-shrink: 0;
 }
 
 .knob-hint {
     flex-grow: 1;
     color: #66615b;
-    font-size: 8px;
+    font-size: 9px;
 }
 
 .time-speed-row {
@@ -571,7 +579,7 @@
 }
 
 .ai-panel {
-    height: 320px;
+    height: 278px;
 }
 
 .ai-assistant-row {
