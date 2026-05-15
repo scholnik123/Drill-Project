@@ -1,2 +1,0 @@
-Wrong block type 0 for END_FOR
-Unsupported opcode: PUSH_EXC_INFO (105)
