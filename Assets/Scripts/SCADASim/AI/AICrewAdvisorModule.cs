@@ -85,7 +85,7 @@ namespace SCADASim.AI
                     AlertSeverity.Warning,
                     "ИИ-бригадир: момент и вибрация",
                     $"Момент {state.SurfaceTorqueKnM:0.0} кНм при вибрации {vibrationG:0.0} g. Похоже на stick-slip или перегрузку привода.",
-                    "Бурильщику снизить обороты на один шаг, ННБ подтвердить toolface, нагрузку возвращать только после затухания вибрации.",
+                    "Бурильщику снизить обороты на один шаг, инженеру ННБ подтвердить положение отклонителя, нагрузку возвращать только после затухания вибрации.",
                     state.MeasuredDepth);
                 return;
             }
@@ -146,7 +146,7 @@ namespace SCADASim.AI
                     RaiseCrewAdvice(
                         AlertSeverity.Advisory,
                         "ИИ-бригадир: ННБ",
-                        $"Зенит {state.InclinationDegrees:0.0}°, азимут {state.AzimuthDegrees:0}°, dogleg {state.DoglegSeverityDegPer30m:0.0}°/30 м.",
+                        $"Зенит {state.InclinationDegrees:0.0}°, азимут {state.AzimuthDegrees:0}°, искривление {state.DoglegSeverityDegPer30m:0.0}°/30 м.",
                         "Если момент начнет расти, запросить контрольный замер и не форсировать набор угла.",
                         state.MeasuredDepth,
                         false);

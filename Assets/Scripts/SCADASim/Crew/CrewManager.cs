@@ -81,6 +81,9 @@ namespace SCADASim.Crew
         private float presetSituationalAwareness01;
         private float presetMaintenanceReadiness01;
         private float presetShiftCoordination01;
+        private float difficultyFatigueMultiplier = 1f;
+        private float difficultyDelayMultiplier = 1f;
+        private float difficultyMistakeMultiplier = 1f;
         private int operationalDay = 1;
         private int currentShiftIndex;
         private float shiftClockSeconds;
@@ -149,6 +152,49 @@ namespace SCADASim.Crew
             shiftClockSeconds = Mathf.Min(shiftClockSeconds, Mathf.Max(0f, shiftDurationSeconds - 1f));
         }
 
+        public void ApplyDifficulty(DifficultyLevel difficulty)
+        {
+            DifficultyTuning tuning = DifficultyProfile.Get(difficulty);
+            difficultyFatigueMultiplier = tuning.FatigueMultiplier;
+            difficultyDelayMultiplier = tuning.ReactionDelayMultiplier;
+            difficultyMistakeMultiplier = tuning.MistakeChanceMultiplier;
+        }
+
+        public CrewManagerSaveData CaptureSaveData()
+        {
+            return new CrewManagerSaveData
+            {
+                ExperienceLevel = experienceLevel,
+                Fatigue = fatigue,
+                Morale = morale,
+                ProcedureDiscipline01 = procedureDiscipline01,
+                SituationalAwareness01 = situationalAwareness01,
+                MaintenanceReadiness01 = maintenanceReadiness01,
+                ShiftCoordination01 = shiftCoordination01,
+                ShiftDurationMinutes = shiftDurationMinutes,
+                OperationalDay = operationalDay,
+                CurrentShiftIndex = currentShiftIndex,
+                ShiftClockSeconds = shiftClockSeconds
+            };
+        }
+
+        public void RestoreSaveData(CrewManagerSaveData saveData)
+        {
+            experienceLevel = Mathf.Clamp01(saveData.ExperienceLevel);
+            fatigue = Mathf.Clamp01(saveData.Fatigue);
+            morale = Mathf.Clamp01(saveData.Morale);
+            procedureDiscipline01 = Mathf.Clamp01(saveData.ProcedureDiscipline01);
+            situationalAwareness01 = Mathf.Clamp01(saveData.SituationalAwareness01);
+            maintenanceReadiness01 = Mathf.Clamp01(saveData.MaintenanceReadiness01);
+            shiftCoordination01 = Mathf.Clamp01(saveData.ShiftCoordination01);
+            shiftDurationMinutes = Mathf.Clamp(saveData.ShiftDurationMinutes, 3f, 24f);
+            operationalDay = Mathf.Max(1, saveData.OperationalDay);
+            currentShiftIndex = Mathf.Clamp(saveData.CurrentShiftIndex, 0, ShiftProfiles.Length - 1);
+            float shiftDurationSeconds = Mathf.Max(60f, shiftDurationMinutes * 60f);
+            shiftClockSeconds = Mathf.Clamp(saveData.ShiftClockSeconds, 0f, Mathf.Max(0f, shiftDurationSeconds - 1f));
+            pendingCommands.Clear();
+        }
+
         public void AdvanceShiftTime(float deltaSeconds)
         {
             if (deltaSeconds <= 0f)
@@ -159,7 +205,7 @@ namespace SCADASim.Crew
             shiftClockSeconds += deltaSeconds;
             float workload = 1f + pendingCommands.Count * 0.12f;
             CrewShiftProfile profile = CurrentShift;
-            fatigue = Mathf.Clamp01(fatigue + fatigueGrowthPerRealMinute * workload * deltaSeconds / 60f);
+            fatigue = Mathf.Clamp01(fatigue + fatigueGrowthPerRealMinute * difficultyFatigueMultiplier * workload * deltaSeconds / 60f);
             morale = Mathf.Clamp01(morale + moraleRecoveryPerRealMinute * deltaSeconds / 60f - fatigue * 0.002f * deltaSeconds / 60f);
             procedureDiscipline01 = Mathf.MoveTowards(procedureDiscipline01, Mathf.Clamp01(presetProcedureDiscipline01 + profile.DisciplineOffset), deltaSeconds * 0.002f / 60f);
             situationalAwareness01 = Mathf.MoveTowards(situationalAwareness01, Mathf.Clamp01(presetSituationalAwareness01 + profile.AwarenessOffset), deltaSeconds * 0.003f / 60f);
@@ -257,14 +303,16 @@ namespace SCADASim.Crew
             float reactionDelay = baseReactionDelaySeconds *
                                   (1f + fatigue * fatigueDelayMultiplier) *
                                   experienceDelayFactor *
-                                  moraleDelayFactor;
+                                  moraleDelayFactor *
+                                  difficultyDelayMultiplier;
 
             float mistakeChance = baseMistakeChancePerMinute *
                                   Mathf.Lerp(0.35f, 3.6f, fatigue) *
                                   Mathf.Lerp(1.45f, 0.58f, experienceLevel) *
                                   Mathf.Lerp(1.35f, 0.78f, morale) *
                                   Mathf.Lerp(1.18f, 0.72f, procedureDiscipline01) *
-                                  Mathf.Lerp(1.12f, 0.78f, situationalAwareness01);
+                                  Mathf.Lerp(1.12f, 0.78f, situationalAwareness01) *
+                                  difficultyMistakeMultiplier;
 
             float efficiency = Mathf.Clamp01(
                 0.66f +
@@ -562,60 +610,9 @@ namespace SCADASim.Crew
 
         private void RollForOperationalIncident()
         {
-            CrewInfluence influence = GetInfluence();
-            float probabilityThisFrame = influence.MistakeChancePerMinute * Time.deltaTime / 60f;
-
-            if (UnityEngine.Random.value > probabilityThisFrame)
-            {
-                return;
-            }
-
-            float roll = UnityEngine.Random.value;
-            CrewIncidentType type;
-            if (roll < 0.28f)
-            {
-                type = CrewIncidentType.BitBalling;
-            }
-            else if (roll < 0.52f)
-            {
-                type = CrewIncidentType.WallSloughing;
-            }
-            else if (roll < 0.74f)
-            {
-                type = CrewIncidentType.MissedFlowDrop;
-            }
-            else if (roll < 0.9f)
-            {
-                type = CrewIncidentType.WrongMudWeight;
-            }
-            else if (roll < 0.96f)
-            {
-                type = CrewIncidentType.UnsafeRamp;
-            }
-            else if (roll < 0.975f)
-            {
-                type = CrewIncidentType.ToolfaceDrift;
-            }
-            else if (roll < 0.988f)
-            {
-                type = CrewIncidentType.PumpLag;
-            }
-            else if (roll < 0.996f)
-            {
-                type = CrewIncidentType.MissedGasTrend;
-            }
-            else
-            {
-                type = CrewIncidentType.RadioMiscommunication;
-            }
-
-            RaiseIncident(new CrewIncident
-            {
-                Type = type,
-                Severity = AlertSeverity.Warning,
-                Message = ToRussianIncident(type),
-                Probability = influence.MistakeChancePerMinute
-            });
+            // Geological and drilling accidents are deterministic in DrillingModel.
+            // Crew randomness is limited to delayed manual commands, where difficulty
+            // explicitly controls both reaction time and the chance of a wrong setpoint.
         }
 
         private float CalculateActionQuality(CrewActionType actionType)

@@ -5,10 +5,13 @@ using SCADASim.Core;
 using SCADASim.Crew;
 using SCADASim.Environment;
 using SCADASim.Physics;
+using SCADASim.Procedures;
 using SCADASim.Trajectory;
+using System;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.UIElements;
+using System.IO;
 
 namespace SCADASim.UI
 {
@@ -18,7 +21,10 @@ namespace SCADASim.UI
         private const float WellboreVisualRadiusMeters = 8.0f;
         private const int TutorialStepCount = 12;
         private const float DesignWidth = 1600f;
-        private const float DesignHeight = 900f;
+        private const float DesignHeight = 1080f;
+        private const int SessionSaveVersion = 2;
+        private const int SessionSaveSlotCount = 5;
+        private const float SessionAutoSaveIntervalSeconds = 5f;
 
         private static readonly Color GraphRed = new Color(0.88f, 0.02f, 0.08f);
         private static readonly Color GraphGreen = new Color(0.13f, 0.55f, 0.32f);
@@ -67,10 +73,9 @@ namespace SCADASim.UI
 
         private readonly List<string> difficultyChoices = new List<string>
         {
-            "ТРЕНИРОВКА",
-            "ЛЕГКИЙ",
-            "ПРОМЫСЛОВЫЙ",
-            "ЭКСПЕРТНЫЙ"
+            "УЧЕНИК",
+            "МАСТЕР",
+            "ХАРДКОР"
         };
 
         private readonly List<string> physicsChoices = new List<string>
@@ -157,6 +162,9 @@ namespace SCADASim.UI
         private Button telemetryTab;
         private Button profileTab;
         private Button crewTab;
+        private Button continueSessionButton;
+        private readonly List<Button> saveSlotButtons = new List<Button>();
+        private Label selectedSaveSlotLabel;
         private Button tutorialNextButton;
         private Label tutorialTitle;
         private Label tutorialBody;
@@ -190,6 +198,7 @@ namespace SCADASim.UI
         private Label crewShiftValue;
         private Label crewRosterValue;
         private Label crewProcedureValue;
+        private Label fieldProcedureStatusValue;
         private Label profileSummaryValue;
         private Label profilePressureWindowValue;
         private Label profileRiskValue;
@@ -203,6 +212,11 @@ namespace SCADASim.UI
         private Label incidentConsequenceValue;
         private SupervisorTask activeSupervisorTask;
         private bool hasActiveSupervisorTask;
+        private SimulationRuntimeConfig activeRuntimeConfig = SimulationRuntimeConfig.Default;
+        private bool hasActiveRuntimeConfig;
+        private readonly FieldProcedureManager fieldProcedureManager = new FieldProcedureManager();
+        private float nextSessionSaveTime;
+        private int selectedSaveSlotIndex;
 
         private Label rpmValue;
         private Label torqueValue;
@@ -293,6 +307,8 @@ namespace SCADASim.UI
 
         private void OnDestroy()
         {
+            SaveSession(false);
+
             if (eventChannel != null)
             {
                 eventChannel.Raised -= HandleSimulationEvent;
@@ -305,6 +321,11 @@ namespace SCADASim.UI
 
         }
 
+        private void OnApplicationQuit()
+        {
+            SaveSession(false);
+        }
+
         private void Update()
         {
             if (drillingModel == null || Time.time < nextRefreshTime)
@@ -314,6 +335,7 @@ namespace SCADASim.UI
 
             nextRefreshTime = Time.time + 0.15f;
             Refresh(drillingModel.CurrentState);
+            SaveSessionIfNeeded();
         }
 
         private void Build()
@@ -454,13 +476,23 @@ namespace SCADASim.UI
             logoBlock.AddToClassList("intro-logo-block");
             introScreen.Add(logoBlock);
 
-            Label logo = new Label("ZVZ");
-            logo.AddToClassList("intro-logo");
-            logoBlock.Add(logo);
+            Texture2D zvzTexture = Resources.Load<Texture2D>("SCADASim/zvz_intro");
+            if (zvzTexture != null)
+            {
+                Image logoImage = new Image { image = zvzTexture, scaleMode = ScaleMode.ScaleAndCrop };
+                logoImage.AddToClassList("intro-logo-image");
+                logoBlock.Add(logoImage);
+            }
+            else
+            {
+                Label logo = new Label("ZVZ");
+                logo.AddToClassList("intro-logo");
+                logoBlock.Add(logo);
 
-            VisualElement rule = new VisualElement();
-            rule.AddToClassList("intro-logo-rule");
-            logoBlock.Add(rule);
+                VisualElement rule = new VisualElement();
+                rule.AddToClassList("intro-logo-rule");
+                logoBlock.Add(rule);
+            }
 
             Label caption = new Label("SCADA INTELLIGENT SIMULATION v4");
             caption.AddToClassList("intro-caption");
@@ -507,9 +539,19 @@ namespace SCADASim.UI
             cross.AddToClassList("brand-cross");
             brand.Add(cross);
 
-            Label zvz = new Label("ZVZ");
-            zvz.AddToClassList("zvz-logo");
-            brand.Add(zvz);
+            Texture2D zvzTexture = Resources.Load<Texture2D>("SCADASim/zvz_intro");
+            if (zvzTexture != null)
+            {
+                Image zvz = new Image { image = zvzTexture };
+                zvz.AddToClassList("zvz-brand-image");
+                brand.Add(zvz);
+            }
+            else
+            {
+                Label zvz = new Label("ZVZ");
+                zvz.AddToClassList("zvz-logo");
+                brand.Add(zvz);
+            }
 
             Label subtitle = new Label("SCADA INTELLIGENT SIMULATION v4");
             subtitle.AddToClassList("start-subtitle");
@@ -545,6 +587,34 @@ namespace SCADASim.UI
             startButton.text = "НАЧАТЬ СМЕНУ";
             startButton.AddToClassList("start-button");
             configPanel.Add(startButton);
+
+            Label saveSlotsTitle = new Label("СЛОТ СОХРАНЕНИЯ");
+            saveSlotsTitle.AddToClassList("save-slot-title");
+            configPanel.Add(saveSlotsTitle);
+
+            VisualElement saveSlotGrid = new VisualElement();
+            saveSlotGrid.AddToClassList("save-slot-grid");
+            configPanel.Add(saveSlotGrid);
+            saveSlotButtons.Clear();
+            for (int slotIndex = 0; slotIndex < SessionSaveSlotCount; slotIndex++)
+            {
+                int capturedSlotIndex = slotIndex;
+                Button slotButton = new Button(() => SelectSaveSlot(capturedSlotIndex));
+                slotButton.AddToClassList("save-slot-button");
+                saveSlotGrid.Add(slotButton);
+                saveSlotButtons.Add(slotButton);
+            }
+
+            selectedSaveSlotLabel = new Label();
+            selectedSaveSlotLabel.AddToClassList("save-slot-hint");
+            configPanel.Add(selectedSaveSlotLabel);
+
+            continueSessionButton = new Button(LoadSavedSession);
+            continueSessionButton.text = "ЗАГРУЗИТЬ СЛОТ";
+            continueSessionButton.AddToClassList("load-slot-button");
+            continueSessionButton.AddToClassList("continue-button");
+            configPanel.Add(continueSessionButton);
+            RefreshContinueSessionButton();
         }
 
         private void BuildMainScreen(VisualElement root)
@@ -637,8 +707,11 @@ namespace SCADASim.UI
             pressurePanel.Add(pressureGraph);
             depthValue = AddStatusBox(pressurePanel, "ГЛУБИНА: 0 МЕТРОВ");
 
-            VisualElement right = new VisualElement();
+            ScrollView right = new ScrollView(ScrollViewMode.Vertical);
             right.AddToClassList("telemetry-right");
+            right.contentContainer.AddToClassList("telemetry-right-content");
+            right.horizontalScrollerVisibility = ScrollerVisibility.Hidden;
+            right.verticalScrollerVisibility = ScrollerVisibility.Hidden;
             page.Add(right);
 
             VisualElement telemetryPanel = CreateScadaPanel("ТЕЛЕМЕТРИЯ");
@@ -688,17 +761,23 @@ namespace SCADASim.UI
             aiAssistantImage.image = aiAssistantPortrait != null ? aiAssistantPortrait.PortraitTexture : null;
             assistantRow.Add(aiAssistantImage);
 
-            aiAssistantCaption = new Label("ИИ-МОДУЛЬ: онлайн. Оценивает давление, вибрацию, расход и действия бригады.");
+            aiAssistantCaption = new Label("ИИ: онлайн.");
             aiAssistantCaption.AddToClassList("ai-assistant-caption");
             assistantRow.Add(aiAssistantCaption);
 
-            aiRecommendationValue = AddStatusBox(aiPanel, "МОНИТОРИНГ: отклонений нет. Действие: продолжать текущий режим.");
-            aiCrewAdvisorValue = AddStatusBox(aiPanel, "ИИ-БРИГАДИР: смена на связи. Жду изменения параметров и внешних условий.");
+            aiRecommendationValue = AddStatusBox(aiPanel, "ИИ: норма -> держать текущий режим. Цели ИИ не применяются автоматически.");
+            aiCrewAdvisorValue = AddStatusBox(aiPanel, "БРИГАДА: готова -> команды выполняются с задержкой по сложности.");
             aiCrewAdvisorValue.AddToClassList("ai-crew-advisor-box");
-            supervisorTaskValue = AddStatusBox(aiPanel, "ЗАДАЧА: ожидание распоряжения бурового мастера.");
+            supervisorTaskValue = AddStatusBox(aiPanel, "ЗАДАЧА: ожидание распоряжения. Кредиты начисляются за ручное удержание критерия.");
             supervisorTaskValue.AddToClassList("supervisor-task-box");
-            taskEconomyValue = AddStatusBox(aiPanel, "БЮДЖЕТ СМЕНЫ: 0 кредитов // выполнено 0 // провалено 0.");
-            incidentConsequenceValue = AddStatusBox(aiPanel, "ПОСЛЕДСТВИЯ: простои 0 мин // приток 0% // поглощение 0%.");
+
+            VisualElement aiFooterRow = new VisualElement();
+            aiFooterRow.AddToClassList("ai-footer-row");
+            aiPanel.Add(aiFooterRow);
+            taskEconomyValue = AddStatusBox(aiFooterRow, "БЮДЖЕТ: 0 кр. // OK 0 // FAIL 0");
+            taskEconomyValue.AddToClassList("ai-footer-box");
+            incidentConsequenceValue = AddStatusBox(aiFooterRow, "РИСКИ: НПВ 0 мин // приток 0% // погл. 0%");
+            incidentConsequenceValue.AddToClassList("ai-footer-box");
         }
 
         private void BuildProfilePage(VisualElement page)
@@ -776,6 +855,7 @@ namespace SCADASim.UI
             crewActions.Add(CreateFlatButton("ПРИХВАТ: РАСХАЖИВАНИЕ", () => RunCrewAction(CrewActionType.FreeStuckPipe)));
             crewActions.Add(CreateFlatButton("АВТОКОЛЕБАНИЯ: СНИЗИТЬ", () => RunCrewAction(CrewActionType.StickSlipMitigation)));
             crewActions.Add(CreateFlatButton("ПРОРАБОТКА СТВОЛА", () => RunCrewAction(CrewActionType.BackreamAndReam)));
+            fieldProcedureStatusValue = AddStatusBox(actionsPanel, "ПРОЦЕДУРА: нет активного процесса. ПРИТОК и ПРОМЫВКА требуют ручного выполнения шагов.");
 
             VisualElement right = new VisualElement();
             right.AddToClassList("crew-column-side");
@@ -837,16 +917,241 @@ namespace SCADASim.UI
             return binding;
         }
 
+        private static string LegacySessionSavePath => Path.Combine(Application.persistentDataPath, "session_save.json");
+
+        private static string GetSessionSavePath(int slotIndex)
+        {
+            int clampedSlot = Mathf.Clamp(slotIndex, 0, SessionSaveSlotCount - 1);
+            return Path.Combine(Application.persistentDataPath, $"session_save_slot_{clampedSlot + 1}.json");
+        }
+
+        private static bool TryGetReadableSessionPath(int slotIndex, out string path)
+        {
+            path = GetSessionSavePath(slotIndex);
+            if (File.Exists(path))
+            {
+                return true;
+            }
+
+            if (slotIndex == 0 && File.Exists(LegacySessionSavePath))
+            {
+                path = LegacySessionSavePath;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool HasSessionSave(int slotIndex)
+        {
+            return TryGetReadableSessionPath(slotIndex, out _);
+        }
+
+        private static bool TryReadSessionSave(int slotIndex, out SimulationSessionSaveData saveData)
+        {
+            saveData = default;
+            if (!TryGetReadableSessionPath(slotIndex, out string path))
+            {
+                return false;
+            }
+
+            try
+            {
+                saveData = JsonUtility.FromJson<SimulationSessionSaveData>(File.ReadAllText(path));
+                return saveData.Version > 0;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"Session slot {slotIndex + 1} read failed: {exception.Message}");
+                saveData = default;
+                return false;
+            }
+        }
+
+        private void SelectSaveSlot(int slotIndex)
+        {
+            selectedSaveSlotIndex = Mathf.Clamp(slotIndex, 0, SessionSaveSlotCount - 1);
+            RefreshContinueSessionButton();
+        }
+
+        private void RefreshContinueSessionButton()
+        {
+            for (int i = 0; i < saveSlotButtons.Count; i++)
+            {
+                Button slotButton = saveSlotButtons[i];
+                bool hasSave = TryReadSessionSave(i, out SimulationSessionSaveData saveData);
+                slotButton.text = hasSave
+                    ? $"СЛОТ {i + 1}\n{saveData.Drilling.State.MeasuredDepth:0} м | {saveData.SavedAt}"
+                    : $"СЛОТ {i + 1}\nпусто";
+
+                if (i == selectedSaveSlotIndex)
+                {
+                    slotButton.AddToClassList("save-slot-active");
+                }
+                else
+                {
+                    slotButton.RemoveFromClassList("save-slot-active");
+                }
+            }
+
+            bool selectedSlotHasSave = HasSessionSave(selectedSaveSlotIndex);
+            if (selectedSaveSlotLabel != null)
+            {
+                selectedSaveSlotLabel.text = selectedSlotHasSave
+                    ? $"Выбран слот {selectedSaveSlotIndex + 1}: можно загрузить или перезаписать новой сменой."
+                    : $"Выбран слот {selectedSaveSlotIndex + 1}: новая смена будет сохранена сюда.";
+            }
+
+            if (continueSessionButton == null)
+            {
+                return;
+            }
+
+            continueSessionButton.SetEnabled(selectedSlotHasSave);
+            continueSessionButton.text = selectedSlotHasSave ? $"ЗАГРУЗИТЬ СЛОТ {selectedSaveSlotIndex + 1}" : "ВЫБРАННЫЙ СЛОТ ПУСТ";
+        }
+
+        private void SaveSessionIfNeeded()
+        {
+            if (!hasActiveRuntimeConfig || Time.unscaledTime < nextSessionSaveTime)
+            {
+                return;
+            }
+
+            nextSessionSaveTime = Time.unscaledTime + SessionAutoSaveIntervalSeconds;
+            SaveSession(false);
+        }
+
+        private void SaveSession(bool force)
+        {
+            if (!hasActiveRuntimeConfig || drillingModel == null || crewManager == null)
+            {
+                return;
+            }
+
+            if (!force && (mainScreen == null || mainScreen.resolvedStyle.display == DisplayStyle.None))
+            {
+                return;
+            }
+
+            try
+            {
+                SimulationSessionSaveData saveData = new SimulationSessionSaveData
+                {
+                    Version = SessionSaveVersion,
+                    SavedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                    Config = activeRuntimeConfig,
+                    Drilling = drillingModel.CaptureSaveData(),
+                    Crew = crewManager.CaptureSaveData(),
+                    LocationIndex = locationChoice?.Index ?? 0,
+                    ProfileIndex = profileChoice?.Index ?? 0,
+                    DepthIndex = depthChoice?.Index ?? 0,
+                    RegionIndex = regionChoice?.Index ?? 0,
+                    DifficultyIndex = difficultyChoice?.Index ?? 0,
+                    PhysicsIndex = physicsChoice?.Index ?? 0,
+                    CrewIndex = crewChoice?.Index ?? 0,
+                    ShiftDurationIndex = shiftDurationChoice?.Index ?? 0,
+                    SupervisorPaceIndex = supervisorPaceChoice?.Index ?? 0,
+                    StartSpeedIndex = startSpeedChoice?.Index ?? 0,
+                    MusicVolumeIndex = musicVolumeChoice?.Index ?? 0,
+                    ResolutionIndex = resolutionChoice?.Index ?? 0,
+                    TutorialIndex = tutorialChoice?.Index ?? 0
+                };
+
+                string savePath = GetSessionSavePath(selectedSaveSlotIndex);
+                string directory = Path.GetDirectoryName(savePath);
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                File.WriteAllText(savePath, JsonUtility.ToJson(saveData, true));
+                RefreshContinueSessionButton();
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"Session save failed: {exception.Message}");
+            }
+        }
+
+        private void LoadSavedSession()
+        {
+            if (!TryReadSessionSave(selectedSaveSlotIndex, out SimulationSessionSaveData saveData))
+            {
+                RefreshContinueSessionButton();
+                return;
+            }
+
+            try
+            {
+                ApplySavedChoiceIndices(saveData);
+                StartScenarioFromConfig(saveData.Config, false, false);
+                crewManager?.RestoreSaveData(saveData.Crew);
+                drillingModel?.RestoreSaveData(saveData.Drilling);
+                wellbore?.SetVisibleMeasuredDepth(saveData.Drilling.State.MeasuredDepth);
+
+                activeRuntimeConfig = saveData.Config;
+                hasActiveRuntimeConfig = true;
+                nextSessionSaveTime = Time.unscaledTime + SessionAutoSaveIntervalSeconds;
+
+                if (drillingModel != null && drillingModel.TryGetActiveSupervisorTask(out SupervisorTask task))
+                {
+                    activeSupervisorTask = task;
+                    hasActiveSupervisorTask = true;
+                    supervisorTaskValue.text = CompactStatus(FormatSupervisorTask(task), 520);
+                }
+                else
+                {
+                    hasActiveSupervisorTask = false;
+                    supervisorTaskValue.text = "ЗАДАЧА: сохраненная смена загружена. Новое распоряжение будет выдано по обстановке.";
+                }
+
+                radioLogValue.text = $"[{FormatClock()}] Сессия восстановлена: глубина {saveData.Drilling.State.MeasuredDepth:0} м, сохранение {saveData.SavedAt}.";
+                Refresh(saveData.Drilling.State);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"Session load failed: {exception.Message}");
+                RefreshContinueSessionButton();
+            }
+        }
+
+        private void ApplySavedChoiceIndices(SimulationSessionSaveData saveData)
+        {
+            locationChoice?.SetIndex(saveData.LocationIndex);
+            profileChoice?.SetIndex(saveData.ProfileIndex);
+            depthChoice?.SetIndex(saveData.DepthIndex);
+            regionChoice?.SetIndex(saveData.RegionIndex);
+            difficultyChoice?.SetIndex(saveData.DifficultyIndex);
+            physicsChoice?.SetIndex(saveData.PhysicsIndex);
+            crewChoice?.SetIndex(saveData.CrewIndex);
+            shiftDurationChoice?.SetIndex(saveData.ShiftDurationIndex);
+            supervisorPaceChoice?.SetIndex(saveData.SupervisorPaceIndex);
+            startSpeedChoice?.SetIndex(saveData.StartSpeedIndex);
+            musicVolumeChoice?.SetIndex(saveData.MusicVolumeIndex);
+            resolutionChoice?.SetIndex(saveData.ResolutionIndex);
+            tutorialChoice?.SetIndex(saveData.TutorialIndex);
+        }
+
         private void ApplyConfigAndStart()
         {
             SimulationRuntimeConfig config = BuildRuntimeConfigFromUI();
             Debug.Log($"SCADA simulation start: {config.EnvironmentType}, {config.ProfileType}, measured depth {config.StartMeasuredDepth:0}-{config.MaxMeasuredDepth:0} m.");
+
+            StartScenarioFromConfig(config, tutorialChoice == null || tutorialChoice.Index == 0, true);
+        }
+
+        private void StartScenarioFromConfig(SimulationRuntimeConfig config, bool runTutorial, bool saveImmediately)
+        {
+            activeRuntimeConfig = config;
+            hasActiveRuntimeConfig = true;
 
             ApplyDisplayResolution(resolutionChoice != null ? resolutionChoice.Index : 0);
 
             environmentManager?.LoadEnvironment(config.EnvironmentType);
             rigModelManager?.LoadRigModel(config.EnvironmentType);
             crewManager?.ApplyPreset(config.CrewPreset);
+            crewManager?.ApplyDifficulty(config.Difficulty);
             crewManager?.SetShiftDurationMinutes(ResolveShiftDurationMinutes());
 
             wellbore?.ConfigureRuntime(
@@ -867,7 +1172,6 @@ namespace SCADASim.UI
             drillingModel?.SetSimulationSpeedMultiplier(ResolveStartSpeedMultiplier());
             drillingModel?.SetSupervisorCadenceMultiplier(ResolveSupervisorCadenceMultiplier());
             musicPlayer?.SetVolume(ResolveMusicVolume());
-            bool runTutorial = tutorialChoice == null || tutorialChoice.Index == 0;
             drillingModel?.SetSimulating(!runTutorial);
 
             configLine.text = $"[{ToShortText(config.EnvironmentType)}] | [{ToShortText(config.ProfileType)}] | {ToShortText(config.GeologyRegion)} | РЕЖИМ: {ToShortText(config.Difficulty)}";
@@ -876,11 +1180,17 @@ namespace SCADASim.UI
                 ? "ПОГОДА: -4.1 C // ВЕТЕР: 21.8 М/С // ВОЛНА: 2.6 м"
                 : "ПОГОДА: -15.3 C // ВЕТЕР: 13.2 М/С";
             radioLogValue.text = $"[00:00:01] Регион: {ToShortText(config.GeologyRegion)}. Бригада: {ToCrewSize(config.CrewPreset)} чел. Система запущена.";
+            fieldProcedureManager.Reset();
+            if (fieldProcedureStatusValue != null)
+            {
+                fieldProcedureStatusValue.text = "ПРОЦЕДУРА: нет активного процесса. ПРИТОК и ПРОМЫВКА требуют ручного выполнения шагов.";
+            }
+
             hasActiveSupervisorTask = false;
-            supervisorTaskValue.text = "ЗАДАЧА: ожидание распоряжения бурового мастера.";
+            supervisorTaskValue.text = "ЗАДАЧА: ожидание распоряжения. Кредиты начисляются за ручное удержание критерия.";
             if (aiCrewAdvisorValue != null)
             {
-                aiCrewAdvisorValue.text = "ИИ-БРИГАДИР: смена на связи. Жду изменения параметров и внешних условий.";
+                aiCrewAdvisorValue.text = "БРИГАДА: готова -> команды выполняются с задержкой по сложности.";
             }
 
             ShowMainScreen();
@@ -888,6 +1198,16 @@ namespace SCADASim.UI
             if (runTutorial)
             {
                 ShowTutorialOverlay();
+            }
+            else if (tutorialOverlay != null)
+            {
+                tutorialOverlay.style.display = DisplayStyle.None;
+            }
+
+            nextSessionSaveTime = 0f;
+            if (saveImmediately)
+            {
+                SaveSession(true);
             }
         }
 
@@ -1017,6 +1337,28 @@ namespace SCADASim.UI
                     $"ГОТОВНОСТЬ: опыт {crew.ExperienceLevel * 100f:0}% // усталость {crew.Fatigue * 100f:0}% // дисциплина {crew.ProcedureDiscipline01 * 100f:0}% // координация {crew.ShiftCoordination01 * 100f:0}% // реакция {crew.ReactionDelaySeconds:0.0} с.";
             }
 
+            if (fieldProcedureStatusValue != null && drillingModel != null)
+            {
+                if (fieldProcedureManager.HasActive &&
+                    fieldProcedureManager.Tick(
+                        state,
+                        Time.deltaTime * Mathf.Max(0.25f, drillingModel.SimulationSpeedMultiplier),
+                        out FieldProcedureCompletion completion) &&
+                    completion.Completed)
+                {
+                    CrewActionReport procedureReport = crewManager != null
+                        ? crewManager.ExecuteCrewAction(completion.ActionType, state)
+                        : default;
+                    float quality = crewManager != null
+                        ? Mathf.Clamp01((completion.Quality01 + procedureReport.Quality01) * 0.5f)
+                        : completion.Quality01;
+                    drillingModel.ApplyCrewMitigation(completion.ActionType, quality);
+                    PushRadioMessage($"{completion.RadioMessage} Качество: {quality * 100f:0}%.");
+                }
+
+                fieldProcedureStatusValue.text = CompactStatus(fieldProcedureManager.StatusText, 260);
+            }
+
             if (profileSummaryValue != null)
             {
                 profileSummaryValue.text =
@@ -1040,13 +1382,13 @@ namespace SCADASim.UI
             if (incidentConsequenceValue != null)
             {
                 incidentConsequenceValue.text =
-                    $"ПОСЛЕДСТВИЯ: простои {state.NonProductiveTimeMinutes:0} мин // приток {state.KickRisk01 * 100f:0}% // поглощение {state.LostCirculationRisk01 * 100f:0}%";
+                    $"РИСКИ: НПВ {state.NonProductiveTimeMinutes:0} мин // приток {state.KickRisk01 * 100f:0}% // погл. {state.LostCirculationRisk01 * 100f:0}%";
             }
 
             if (taskEconomyValue != null && drillingModel != null)
             {
                 taskEconomyValue.text =
-                    $"БЮДЖЕТ СМЕНЫ: {drillingModel.CompanyCredits:+0;-0;0} кредитов // выполнено {drillingModel.SuccessfulSupervisorTasks} // провалено {drillingModel.FailedSupervisorTasks}.";
+                    $"БЮДЖЕТ: {drillingModel.CompanyCredits:+0;-0;0} кр. // рейс +{drillingModel.PerformanceCredits} / затр -{drillingModel.OperatingCostCredits} // OK {drillingModel.SuccessfulSupervisorTasks} / FAIL {drillingModel.FailedSupervisorTasks}";
             }
 
             if (aiAssistantImage != null && aiAssistantPortrait != null)
@@ -1056,8 +1398,8 @@ namespace SCADASim.UI
                 if (aiAssistantCaption != null)
                 {
                     aiAssistantCaption.text = aiAssistantPortrait.HasAssistantModel
-                        ? "ИИ-МОДУЛЬ: онлайн. Анализ трендов в реальном времени."
-                        : "ИИ-МОДУЛЬ: онлайн. Работает резервная визуализация.";
+                        ? "ИИ: онлайн."
+                        : "ИИ: резерв.";
                 }
             }
 
@@ -1073,7 +1415,7 @@ namespace SCADASim.UI
 
             if (state.Vibration.LowFrequencyEnergy > 0.58f && state.InclinationDegrees > 70f && crew.Fatigue > 0.5f)
             {
-                aiRecommendationValue.text = "РЕКОМЕНДАЦИЯ ИИ: риск автоколебаний колонны. Действие: плавно снизить обороты на 10-15% и стабилизировать нагрузку.";
+                aiRecommendationValue.text = "ИИ: вибрация в наклонном интервале. Действие: снизить обороты на 10%, нагрузку держать без резких шагов, через 30-40 с проверить момент и давление.";
             }
         }
 
@@ -1081,7 +1423,7 @@ namespace SCADASim.UI
         {
             if (simulationEvent.Type == SimulationEventType.EdgeAIAlert && simulationEvent.Payload is AIRecommendation recommendation)
             {
-                aiRecommendationValue.text = FormatAIRecommendation(recommendation);
+                aiRecommendationValue.text = FormatAIRecommendation(recommendation, drillingModel != null ? drillingModel.CurrentState : default, drillingModel != null);
                 return;
             }
 
@@ -1089,7 +1431,7 @@ namespace SCADASim.UI
             {
                 if (aiCrewAdvisorValue != null)
                 {
-                    aiCrewAdvisorValue.text = FormatAIRecommendation(crewRecommendation);
+                    aiCrewAdvisorValue.text = FormatAIRecommendation(crewRecommendation, drillingModel != null ? drillingModel.CurrentState : default, drillingModel != null);
                 }
 
                 return;
@@ -1097,10 +1439,10 @@ namespace SCADASim.UI
 
             if (simulationEvent.Type == SimulationEventType.OperationalIncident && simulationEvent.Payload is OperationalIncident incident)
             {
-                aiRecommendationValue.text = CompactStatus($"{incident.Title.ToUpperInvariant()}: {incident.Message}", 170);
+                aiRecommendationValue.text = CompactStatus($"АВАРИЯ: {incident.Title} -> {FirstSentenceBeforeDowntime(incident.Consequence)}", 130);
                 if (incidentConsequenceValue != null)
                 {
-                    incidentConsequenceValue.text = CompactStatus($"ПОСЛЕДСТВИЯ: {incident.Consequence}", 180);
+                    incidentConsequenceValue.text = CompactStatus($"РИСК: {incident.Title}", 70);
                 }
 
                 radioLogValue.text = $"[{FormatClock()}] Инцидент на глубине по стволу {incident.MeasuredDepth:0} м: {incident.Title}.";
@@ -1124,15 +1466,15 @@ namespace SCADASim.UI
             {
                 hasActiveSupervisorTask = false;
                 string status = taskResult.Succeeded ? "ЗАДАЧА ВЫПОЛНЕНА" : "ЗАДАЧА ПРОВАЛЕНА";
-                aiRecommendationValue.text = CompactStatus($"{status}: {taskResult.Summary}", 190);
+                aiRecommendationValue.text = $"{status}: {taskResult.Task.Title}";
                 if (supervisorTaskValue != null)
                 {
-                    supervisorTaskValue.text = $"{status}: {taskResult.Task.Title}. {(taskResult.CreditsDelta >= 0 ? "+" : string.Empty)}{taskResult.CreditsDelta} кредитов.";
+                    supervisorTaskValue.text = CompactStatus($"{status}: {taskResult.Task.Title}. Итог: {taskResult.Summary} Баланс {(taskResult.CreditsDelta >= 0 ? "+" : string.Empty)}{taskResult.CreditsDelta} кр.", 420);
                 }
 
                 if (taskEconomyValue != null)
                 {
-                    taskEconomyValue.text = $"БЮДЖЕТ СМЕНЫ: {taskResult.TotalCredits:+0;-0;0} кредитов // последний результат: {(taskResult.CreditsDelta >= 0 ? "+" : string.Empty)}{taskResult.CreditsDelta}.";
+                    taskEconomyValue.text = $"БЮДЖЕТ: {taskResult.TotalCredits:+0;-0;0} кр. // последн. {(taskResult.CreditsDelta >= 0 ? "+" : string.Empty)}{taskResult.CreditsDelta}";
                 }
 
                 radioLogValue.text = $"[{FormatClock()}] {status}: {taskResult.Summary}";
@@ -1159,6 +1501,7 @@ namespace SCADASim.UI
 
             startScreen.style.display = DisplayStyle.Flex;
             mainScreen.style.display = DisplayStyle.None;
+            RefreshContinueSessionButton();
         }
 
         private void ShowIntroOrStartScreen()
@@ -1363,6 +1706,7 @@ namespace SCADASim.UI
 
         private void ReturnToMainMenu()
         {
+            SaveSession(true);
             drillingModel?.SetSimulating(false);
             if (tutorialOverlay != null)
             {
@@ -1372,7 +1716,7 @@ namespace SCADASim.UI
             hasActiveSupervisorTask = false;
             if (supervisorTaskValue != null)
             {
-                supervisorTaskValue.text = "ЗАДАЧА: ожидание распоряжения бурового мастера.";
+                supervisorTaskValue.text = "ЗАДАЧА: ожидание распоряжения. Кредиты начисляются за ручное удержание критерия.";
             }
 
             if (wellbore != null)
@@ -1487,37 +1831,28 @@ namespace SCADASim.UI
                 return;
             }
 
+            if (actionType == CrewActionType.KickControl || actionType == CrewActionType.HoleCleaning)
+            {
+                DifficultyTuning tuning = DifficultyProfile.Get(activeRuntimeConfig.Difficulty);
+                if (fieldProcedureManager.Start(actionType, drillingModel.CurrentState, tuning, out string procedureMessage))
+                {
+                    PushRadioMessage(procedureMessage);
+                }
+                else
+                {
+                    PushRadioMessage(procedureMessage);
+                }
+
+                return;
+            }
+
             CrewActionReport report = crewManager.ExecuteCrewAction(actionType, drillingModel.CurrentState);
             drillingModel.ApplyCrewMitigation(actionType, report.Quality01);
             PushRadioMessage($"{report.Role}: {report.Message} {report.Effect} Качество: {report.Quality01 * 100f:0}%.");
 
-            if (actionType == CrewActionType.HoleCleaning && report.Quality01 > 0.35f)
-            {
-                float flowBoostLpm = Mathf.Lerp(80f, 220f, report.Quality01);
-                AdjustFlowLitersPerMinute(flowBoostLpm);
-            }
-
             if (actionType == CrewActionType.ShiftBriefing && report.Quality01 > 0.45f)
             {
                 crewManager.ApplyRest(0.04f);
-            }
-
-            if (actionType == CrewActionType.KickControl && report.Quality01 > 0.4f)
-            {
-                AdjustMudWeight(0.02f);
-                AdjustChoke(-0.08f);
-            }
-
-            if (actionType == CrewActionType.LossControl && report.Quality01 > 0.4f)
-            {
-                AdjustFlowLitersPerMinute(-120f);
-                AdjustChoke(0.05f);
-            }
-
-            if (actionType == CrewActionType.StickSlipMitigation && report.Quality01 > 0.4f)
-            {
-                AdjustRpm(-15f);
-                AdjustWob(-1f);
             }
         }
 
@@ -1817,10 +2152,8 @@ namespace SCADASim.UI
             switch (index)
             {
                 case 1:
-                    return DifficultyLevel.Easy;
-                case 2:
                     return DifficultyLevel.Realistic;
-                case 3:
+                case 2:
                     return DifficultyLevel.Expert;
                 default:
                     return DifficultyLevel.Training;
@@ -2006,13 +2339,13 @@ namespace SCADASim.UI
             switch (difficulty)
             {
                 case DifficultyLevel.Easy:
-                    return "ЛЕГКИЙ";
+                    return "УЧЕНИК+";
                 case DifficultyLevel.Realistic:
-                    return "ПРОМЫСЛОВЫЙ";
+                    return "МАСТЕР";
                 case DifficultyLevel.Expert:
-                    return "ЭКСПЕРТНЫЙ";
+                    return "ХАРДКОР";
                 default:
-                    return "ТРЕНИРОВКА";
+                    return "УЧЕНИК";
             }
         }
 
@@ -2050,16 +2383,110 @@ namespace SCADASim.UI
             }
         }
 
-        private static string FormatAIRecommendation(AIRecommendation recommendation)
+        private static string FormatAIRecommendation(AIRecommendation recommendation, DrillingState state, bool hasState)
         {
-            string severity = recommendation.Severity == AlertSeverity.Critical ? "критический риск" : "предупреждение";
-            string action = recommendation.RecommendedAction.Trim();
+            string severity = recommendation.Severity == AlertSeverity.Critical ? "КРИТИЧНО" :
+                recommendation.Severity == AlertSeverity.Warning ? "ВНИМАНИЕ" : "ИИ-КОНТРОЛЬ";
+            string action = hasState
+                ? BuildDirectAIAction(recommendation, state)
+                : NormalizeShortCommand(recommendation.RecommendedAction);
+            string reason = FirstSentenceBeforeDowntime(recommendation.Message).Trim();
+            if (string.IsNullOrWhiteSpace(reason))
+            {
+                reason = "зафиксирован отклоняющийся тренд по телеметрии.";
+            }
+
+            return CompactStatus($"{severity}: {recommendation.Title}. Причина: {reason} Действие: {action}", 460);
+        }
+
+        private static string BuildDirectAIAction(AIRecommendation recommendation, DrillingState state)
+        {
+            string source = $"{recommendation.Title} {recommendation.Message} {recommendation.RecommendedAction}".ToLowerInvariant();
+            float rpm = state.Rpm;
+            float wob = state.WeightOnBitTonnes;
+            float flowLpm = state.FlowRateLps * 60f;
+            float mud = state.MudWeightSG;
+            float choke = state.ChokeOpening01 * 100f;
+
+            if (source.Contains("приток") || source.Contains("kick") || source.Contains("газ"))
+            {
+                return $"штуцер {choke:0}% -> {ClampPercent(choke - 10f):0}%, плотность {mud:0.00} -> {ClampMud(mud + 0.03f):0.00} SG, расход держать {flowLpm:0} л/мин; цель: газ <3%, выход-вход <=+3%, запас к пластовому >0.25 МПа.";
+            }
+
+            if (source.Contains("поглощ") || source.Contains("loss") || source.Contains("выход ниже"))
+            {
+                return $"расход {flowLpm:0} -> {ClampFlow(flowLpm - 200f):0} л/мин, штуцер {choke:0}% -> {ClampPercent(choke + 10f):0}%, плотность не повышать; цель: выход-вход >-5%, давление насоса не растет.";
+            }
+
+            if (source.Contains("вибрац") || source.Contains("stick") || source.Contains("автоколеб") || source.Contains("момент"))
+            {
+                return $"обороты {rpm:0} -> {ClampRpm(rpm - 15f):0} об/мин, нагрузка {wob:0.0} -> {ClampWob(wob - 1.5f):0.0} т; цель: вибрация <2.2 g, момент падает или стабилен 30-40 с.";
+            }
+
+            if (source.Contains("очист") || source.Contains("шлам") || source.Contains("pack"))
+            {
+                return $"расход {flowLpm:0} -> {ClampFlow(flowLpm + 150f):0} л/мин, нагрузка {wob:0.0} -> {ClampWob(wob - 1f):0.0} т, выполнить промывку; цель: очистка >70%, давление насоса +<12 бар.";
+            }
+
+            if (source.Contains("давлен") || source.Contains("окно") || source.Contains("ecd"))
+            {
+                float lowMargin = state.BottomHolePressureMPa - state.PorePressureMPa;
+                float highMargin = state.FracturePressureMPa - state.BottomHolePressureMPa;
+                if (lowMargin < 0.25f)
+                {
+                    return $"плотность {mud:0.00} -> {ClampMud(mud + 0.02f):0.00} SG или штуцер {choke:0}% -> {ClampPercent(choke - 5f):0}%; цель: запас к пластовому >0.25 МПа.";
+                }
+
+                if (highMargin < 0.45f)
+                {
+                    return $"штуцер {choke:0}% -> {ClampPercent(choke + 5f):0}% или расход {flowLpm:0} -> {ClampFlow(flowLpm - 100f):0} л/мин; цель: запас до ГРП >0.45 МПа.";
+                }
+            }
+
+            if (source.Contains("долото") || source.Contains("износ"))
+            {
+                return $"нагрузка {wob:0.0} -> {ClampWob(wob - 2f):0.0} т, обороты {rpm:0} -> {ClampRpm(rpm - 20f):0}; цель: вибрация <2.2 g, ROP не ниже 8 м/ч.";
+            }
+
+            return NormalizeShortCommand(recommendation.RecommendedAction);
+        }
+
+        private static string NormalizeShortCommand(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return "держать контроль";
+            }
+
+            string action = FirstSentenceBeforeDowntime(text).Trim();
             if (!action.EndsWith("."))
             {
                 action += ".";
             }
 
-            return CompactStatus($"ИИ: {severity}. {recommendation.Title}. Причина: {recommendation.Message} Действие: {action}", 240);
+            return action;
+        }
+
+        private static string FirstSentenceBeforeDowntime(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return string.Empty;
+            }
+
+            int downtimeIndex = text.IndexOf("Простои", System.StringComparison.OrdinalIgnoreCase);
+            if (downtimeIndex > 0)
+            {
+                text = text.Substring(0, downtimeIndex).Trim();
+            }
+
+            int sentenceIndex = text.IndexOf('.');
+            if (sentenceIndex >= 0)
+            {
+                text = text.Substring(0, sentenceIndex + 1).Trim();
+            }
+
+            return text;
         }
 
         private static string CompactStatus(string text, int maxCharacters)
@@ -2080,8 +2507,54 @@ namespace SCADASim.UI
             string timerText = remainingMinutes > 0f
                 ? FormatCountdown(remainingMinutes)
                 : "СРОК ИСТЕК";
+            string holdText = drillingModel != null
+                ? $"Удержание {drillingModel.ActiveSupervisorTaskStableSeconds:0}/{task.MinimumHoldSeconds:0} сек."
+                : $"Удержание 0/{task.MinimumHoldSeconds:0} сек.";
 
-            return $"ЗАДАЧА: {task.Title}. До срока: {timerText}. Критерий: {task.SuccessCriteria} План инженера: {BuildEngineeringTaskGuide(task)} Контроль: {task.SensorFocus}. Бонус +{task.RewardCredits} / штраф -{task.FailurePenaltyCredits}.";
+            return $"ЗАДАЧА: {task.Title}. До срока {timerText}. {holdText} {BuildEngineeringTaskGuide(task)}";
+        }
+
+        private static string BuildShortTaskAction(SupervisorTask task)
+        {
+            switch (task.Type)
+            {
+                case SupervisorTaskType.KickControl:
+                    return "прикрыть штуцер, плотность +0.03 SG";
+                case SupervisorTaskType.LossControl:
+                    return "снизить расход, проверить емкости";
+                case SupervisorTaskType.DirectionalDrag:
+                    return "нагрузку -1 т, очистку усилить";
+                case SupervisorTaskType.HoleCleaning:
+                    return "расход +100 л/мин, промывка";
+                case SupervisorTaskType.ShaleStability:
+                    return "стабилизировать плотность и расход";
+                case SupervisorTaskType.BitAssessment:
+                    return "нагрузку и обороты снизить, долото проверить";
+                case SupervisorTaskType.PressureWindow:
+                    return "держать окно давлений";
+                case SupervisorTaskType.CrewHandover:
+                    return "инструктаж, скорость x1";
+                case SupervisorTaskType.PumpEfficiency:
+                    return "насос проверить, расход ступенями";
+                case SupervisorTaskType.GasMonitoring:
+                    return "дегазатор и емкости проверить";
+                case SupervisorTaskType.ToolfaceControl:
+                    return "замер ННБ, нагрузку мягко";
+                case SupervisorTaskType.PumpIntegrity:
+                    return "проверка насосов";
+                case SupervisorTaskType.EquipmentInspection:
+                    return "осмотр привода и вышки";
+                case SupervisorTaskType.WeatherResponse:
+                    return "связь подтвердить, темп снизить";
+                case SupervisorTaskType.MwdSurvey:
+                    return "контрольный замер ННБ";
+                case SupervisorTaskType.TorqueSmoothing:
+                    return "обороты и нагрузку снизить малыми шагами";
+                case SupervisorTaskType.ConnectionProcedure:
+                    return "стабилизировать циркуляцию";
+                default:
+                    return "держать ROP, вибрацию контролировать";
+            }
         }
 
         private string BuildEngineeringTaskGuide(SupervisorTask task)
@@ -2098,63 +2571,98 @@ namespace SCADASim.UI
             float lowMargin = state.BottomHolePressureMPa - state.PorePressureMPa;
             float highMargin = state.FracturePressureMPa - state.BottomHolePressureMPa;
             float flowLpm = state.FlowRateLps * 60f;
+            float rpm = state.Rpm;
+            float wob = state.WeightOnBitTonnes;
+            float mud = state.MudWeightSG;
+            float choke = state.ChokeOpening01 * 100f;
 
             switch (task.Type)
             {
                 case SupervisorTaskType.KickControl:
-                    return $"сейчас выход {flowBalancePercent:+0.0;-0.0;0.0}%, газ {state.GasUnitsPercent:0.0}%, запас к пластовому {lowMargin:0.0} МПа. Прикрывайте штуцер на 5-10% и поднимайте плотность на 0.02-0.05 SG до запаса >0.25 МПа; обороты и нагрузку не повышать.";
+                    return $"СДЕЛАТЬ: штуцер {choke:0}% -> {ClampPercent(choke - 10f):0}%, плотность {mud:0.00} -> {ClampMud(mud + 0.03f):0.00} SG, RPM/WOB не повышать. ЦЕЛЬ: газ <3%, выход-вход <=+3%, запас к пластовому >0.25 МПа. Сейчас: выход {flowBalancePercent:+0.0;-0.0;0.0}%, газ {state.GasUnitsPercent:0.0}%, запас {lowMargin:0.0} МПа.";
 
                 case SupervisorTaskType.LossControl:
-                    return $"сейчас выход {flowBalancePercent:+0.0;-0.0;0.0}%, расход {flowLpm:0} л/мин. Снизьте расход на 100-250 л/мин и откройте штуцер на 5-10%; плотность не повышать, пока выход не лучше -5%.";
+                    return $"СДЕЛАТЬ: расход {flowLpm:0} -> {ClampFlow(flowLpm - 200f):0} л/мин, штуцер {choke:0}% -> {ClampPercent(choke + 10f):0}%, плотность не повышать. ЦЕЛЬ: выход-вход >-5%, давление насоса без роста. Сейчас: баланс {flowBalancePercent:+0.0;-0.0;0.0}%.";
 
                 case SupervisorTaskType.DirectionalDrag:
-                    return $"сейчас сопротивление {state.DragTonnes:0.0} т, очистка {state.CuttingsTransportEfficiency01 * 100f:0}%, вибрация {vibrationG:0.0} g. Снизьте нагрузку на 0.5-2 т, при плохой очистке добавьте расход 100-200 л/мин, при вибрации снизьте обороты на 10-20.";
+                    return $"СДЕЛАТЬ: нагрузка {wob:0.0} -> {ClampWob(wob - 1.5f):0.0} т, расход {flowLpm:0} -> {ClampFlow(flowLpm + 150f):0} л/мин, если вибрация >2.2 g то RPM {rpm:0} -> {ClampRpm(rpm - 15f):0}. ЦЕЛЬ: сопротивление <{Mathf.Max(1.2f, task.BaselineDragTonnes + 0.6f):0.0} т, очистка >68%.";
 
                 case SupervisorTaskType.HoleCleaning:
-                    return $"сейчас очистка {state.CuttingsTransportEfficiency01 * 100f:0}%, давление насоса {state.StandpipePressureBar:0} бар. Поднимайте расход ступенями по 100 л/мин, снизьте нагрузку на 1-2 т и выполните промывку ствола; остановиться, если давление насоса растет >12 бар.";
+                    return $"СДЕЛАТЬ: расход {flowLpm:0} -> {ClampFlow(flowLpm + 200f):0} л/мин, нагрузка {wob:0.0} -> {ClampWob(wob - 1f):0.0} т, бригада: ПРОМЫВКА. ЦЕЛЬ: очистка >72%, давление насоса <{task.BaselineStandpipePressureBar + 18f:0} бар.";
 
                 case SupervisorTaskType.ShaleStability:
-                    return $"сейчас запас к пластовому {lowMargin:0.0} МПа, до гидроразрыва {highMargin:0.0} МПа. Если нижний запас <0.25 МПа - плотность +0.01-0.03 SG или штуцер -5%; если верхний запас <0.45 МПа - плотность -0.01-0.03 SG или штуцер +5%.";
+                    return lowMargin < 0.25f
+                        ? $"СДЕЛАТЬ: плотность {mud:0.00} -> {ClampMud(mud + 0.02f):0.00} SG или штуцер {choke:0}% -> {ClampPercent(choke - 5f):0}%. ЦЕЛЬ: запас к пластовому >0.25 МПа, осыпь <45%."
+                        : $"СДЕЛАТЬ: держать плотность {mud:0.00} SG, расход {flowLpm:0} л/мин без рывков; если запас до ГРП <0.45 МПа, штуцер {choke:0}% -> {ClampPercent(choke + 5f):0}%. ЦЕЛЬ: оба запаса положительные.";
 
                 case SupervisorTaskType.BitAssessment:
-                    return $"сейчас вибрация {vibrationG:0.0} g, момент {state.SurfaceTorqueKnM:0.0} кНм, скорость {state.RopMPerHour:0.0} м/ч. Снизьте нагрузку на 1-3 т и обороты на 10-25; затем возвращайте нагрузку только если вибрация <2.2 g.";
+                    return $"СДЕЛАТЬ: нагрузка {wob:0.0} -> {ClampWob(wob - 2f):0.0} т, RPM {rpm:0} -> {ClampRpm(rpm - 20f):0}; если ROP <8 м/ч вернуть WOB +0.5 т. ЦЕЛЬ: вибрация <2.2 g, момент <{Mathf.Max(6f, task.BaselineTorqueKnM + 4f):0.0} кНм.";
 
                 case SupervisorTaskType.PressureWindow:
-                    return $"сейчас запас к пластовому {lowMargin:0.0} МПа, до гидроразрыва {highMargin:0.0} МПа. Работайте плотностью по 0.01-0.03 SG и штуцером по 5%; держите оба запаса положительными и не меняйте расход резко.";
+                    return lowMargin < highMargin
+                        ? $"СДЕЛАТЬ: плотность {mud:0.00} -> {ClampMud(mud + 0.02f):0.00} SG или штуцер {choke:0}% -> {ClampPercent(choke - 5f):0}%. ЦЕЛЬ: запас к пластовому 0.3-1.2 МПа, до ГРП >0.45 МПа."
+                        : $"СДЕЛАТЬ: штуцер {choke:0}% -> {ClampPercent(choke + 5f):0}% или расход {flowLpm:0} -> {ClampFlow(flowLpm - 100f):0} л/мин. ЦЕЛЬ: запас до ГРП >0.45 МПа, приток 0-3%.";
 
                 case SupervisorTaskType.CrewHandover:
-                    return $"сейчас усталость смены высокая. Выполните инструктаж, осмотр вышки и план рейса; держите скорость времени x1 и не отправляйте лишние команды, пока усталость не снизится ниже 58%.";
+                    return $"СДЕЛАТЬ: скорость времени x1, бригада: ИНСТРУКТАЖ + ОСМОТР, 60 сек без резких команд. ЦЕЛЬ: усталость <58%, дисциплина >70%, затем продолжать.";
 
                 case SupervisorTaskType.PumpEfficiency:
-                    return $"сейчас расход {flowLpm:0} л/мин, очистка {state.CuttingsTransportEfficiency01 * 100f:0}%, давление насоса {state.StandpipePressureBar:0} бар. Если очистка <64% - расход +100 л/мин; если давление выросло >18 бар - расход -100 л/мин и проверьте вынос.";
+                    return state.CuttingsTransportEfficiency01 < 0.64f
+                        ? $"СДЕЛАТЬ: расход {flowLpm:0} -> {ClampFlow(flowLpm + 100f):0} л/мин, затем держать 30 сек. ЦЕЛЬ: очистка >66%, давление насоса <{task.BaselineStandpipePressureBar + 18f:0} бар."
+                        : $"СДЕЛАТЬ: расход {flowLpm:0} -> {ClampFlow(flowLpm - 100f):0} л/мин, бригада: проверить насосы. ЦЕЛЬ: давление насоса <{task.BaselineStandpipePressureBar + 12f:0} бар без падения очистки <60%.";
 
                 case SupervisorTaskType.GasMonitoring:
-                    return $"сейчас газ {state.GasUnitsPercent:0.0}%, выход {flowBalancePercent:+0.0;-0.0;0.0}%, запас к пластовому {lowMargin:0.0} МПа. Не снижайте давление, поручите бригаде контроль дегазатора и емкостей.";
+                    return $"СДЕЛАТЬ: если газ >4%, штуцер {choke:0}% -> {ClampPercent(choke - 5f):0}%, плотность {mud:0.00} -> {ClampMud(mud + 0.01f):0.00} SG; бригада: контроль дегазатора. ЦЕЛЬ: газ <3%, выход-вход <=+3%.";
 
                 case SupervisorTaskType.ToolfaceControl:
-                    return $"сейчас dogleg {state.DoglegSeverityDegPer30m:0.0}°/30 м, зенит {state.InclinationDegrees:0.0}°, drag {state.DragTonnes:0.0} т. Снизьте грубую нагрузку и запросите контрольный MWD-замер.";
+                    return $"СДЕЛАТЬ: нагрузка {wob:0.0} -> {ClampWob(wob - 1f):0.0} т, RPM держать {rpm:0}, бригада: ЗАМЕР ННБ. ЦЕЛЬ: искривление <6°/30 м, сопротивление не растет.";
 
                 case SupervisorTaskType.PumpIntegrity:
-                    return $"сейчас давление насоса {state.StandpipePressureBar:0} бар, расход {flowLpm:0} л/мин, баланс {flowBalancePercent:+0.0;-0.0;0.0}%. Меняйте расход ступенями и отправьте механику на проверку насосов.";
+                    return $"СДЕЛАТЬ: расход менять только по 50-100 л/мин; если давление >{task.BaselineStandpipePressureBar + 18f:0} бар, расход {flowLpm:0} -> {ClampFlow(flowLpm - 100f):0}. Бригада: проверка насосов. ЦЕЛЬ: давление стабильно 30 сек.";
 
                 case SupervisorTaskType.EquipmentInspection:
-                    return $"сейчас момент {state.SurfaceTorqueKnM:0.0} кНм, вибрация {vibrationG:0.0} g. Выполните осмотр вышки/верхнего привода и избегайте одновременного изменения оборотов, нагрузки и расхода.";
+                    return $"СДЕЛАТЬ: бригада: ОСМОТР ВЫШКИ, RPM {rpm:0} -> {ClampRpm(rpm - 10f):0} если момент >{task.BaselineTorqueKnM + 5f:0.0} кНм. ЦЕЛЬ: момент не растет, вибрация <2.2 g.";
 
                 case SupervisorTaskType.WeatherResponse:
-                    return $"внешние условия мешают работе смены. Проведите инструктаж, подтвердите связь и контроль емкостей; параметры менять медленнее обычного.";
+                    return $"СДЕЛАТЬ: скорость x1, бригада: инструктаж + связь + контроль емкостей; менять только один параметр за раз. ЦЕЛЬ: 60 сек без инцидента и без роста рисков.";
 
                 case SupervisorTaskType.MwdSurvey:
-                    return $"сейчас зенит {state.InclinationDegrees:0.0}°, азимут {state.AzimuthDegrees:0}°, dogleg {state.DoglegSeverityDegPer30m:0.0}°/30 м. До замера ННБ держите мягкий режим без форсирования угла.";
+                    return $"СДЕЛАТЬ: бригада: КОНТРОЛЬНЫЙ ЗАМЕР ННБ, нагрузка {wob:0.0} -> {ClampWob(wob - 0.5f):0.0} т до результата. ЦЕЛЬ: зенит стабилен +/-1°, искривление <6°/30 м.";
 
                 case SupervisorTaskType.TorqueSmoothing:
-                    return $"сейчас момент {state.SurfaceTorqueKnM:0.0} кНм, вибрация {vibrationG:0.0} g. Снизьте обороты и нагрузку малыми шагами; возвращайте режим только после стабилизации момента.";
+                    return $"СДЕЛАТЬ: RPM {rpm:0} -> {ClampRpm(rpm - 15f):0}, нагрузка {wob:0.0} -> {ClampWob(wob - 1f):0.0} т. ЦЕЛЬ: момент <{Mathf.Max(6f, task.BaselineTorqueKnM + 3f):0.0} кНм, вибрация <2.0 g.";
 
                 case SupervisorTaskType.ConnectionProcedure:
-                    return $"сейчас баланс {flowBalancePercent:+0.0;-0.0;0.0}%, давление насоса {state.StandpipePressureBar:0} бар. Перед наращиванием стабилизируйте циркуляцию и проведите чек-лист бригады.";
+                    return $"СДЕЛАТЬ: расход держать {flowLpm:0} л/мин, WOB {wob:0.0} -> {ClampWob(wob - 1f):0.0} т, бригада: чек-лист наращивания. ЦЕЛЬ: баланс расхода -3..+3%, давление стабильно 30 сек.";
 
                 default:
-                    return $"держите скорость проходки >10 м/ч при вибрации <2.2 g: обороты и нагрузку повышать малыми шагами, расход держать под очистку, плотность и штуцер не выводить из окна давлений.";
+                    return $"СДЕЛАТЬ: RPM {rpm:0}, WOB {wob:0.0}, расход {flowLpm:0}; менять по одному параметру. ЦЕЛЬ: ROP >10 м/ч, вибрация <2.2 g, оба запаса давления положительные.";
             }
+        }
+
+        private static float ClampRpm(float value)
+        {
+            return Mathf.Clamp(value, 35f, 190f);
+        }
+
+        private static float ClampWob(float value)
+        {
+            return Mathf.Clamp(value, 2f, 26f);
+        }
+
+        private static float ClampFlow(float value)
+        {
+            return Mathf.Clamp(value, 900f, 3600f);
+        }
+
+        private static float ClampMud(float value)
+        {
+            return Mathf.Clamp(value, 0.95f, 1.55f);
+        }
+
+        private static float ClampPercent(float value)
+        {
+            return Mathf.Clamp(value, 0f, 100f);
         }
 
         private static string FormatCountdown(float minutes)
@@ -2831,6 +3339,19 @@ namespace SCADASim.UI
                 }
 
                 Index = (Index + 1) % choices.Count;
+                Refresh();
+            }
+
+            public void SetIndex(int index)
+            {
+                if (choices.Count == 0)
+                {
+                    Index = 0;
+                    Refresh();
+                    return;
+                }
+
+                Index = Mathf.Clamp(index, 0, choices.Count - 1);
                 Refresh();
             }
 

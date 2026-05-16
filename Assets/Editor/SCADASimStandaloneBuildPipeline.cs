@@ -91,10 +91,10 @@ namespace SCADASim.EditorTools
             PlayerSettings.productName = "SCADA Intelligent Simulation v4";
             PlayerSettings.applicationIdentifier = "com.scadasim.intelligent.v4";
             PlayerSettings.runInBackground = true;
-            PlayerSettings.defaultScreenWidth = 1920;
-            PlayerSettings.defaultScreenHeight = 1080;
+            PlayerSettings.defaultScreenWidth = 1600;
+            PlayerSettings.defaultScreenHeight = 900;
             PlayerSettings.fullScreenMode = FullScreenMode.Windowed;
-            PlayerSettings.resizableWindow = true;
+            PlayerSettings.resizableWindow = false;
             PlayerSettings.visibleInBackground = true;
             PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.StandaloneWindows64, false);
             PlayerSettings.SetGraphicsAPIs(

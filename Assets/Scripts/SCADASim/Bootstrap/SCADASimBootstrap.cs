@@ -88,6 +88,8 @@ namespace SCADASim.Bootstrap
             GameObject visualizerObject = new GameObject("Wellbore 3D Visualizer");
             Wellbore3DVisualizer visualizer = visualizerObject.AddComponent<Wellbore3DVisualizer>();
             visualizer.Configure(wellbore, drillingModel, eventChannel);
+            MicroDrillingVisualController microVisualizer = visualizerObject.AddComponent<MicroDrillingVisualController>();
+            microVisualizer.Configure(wellbore, drillingModel);
 
             GameObject aiObject = new GameObject("Edge AI Module");
             EdgeAIModule edgeAI = aiObject.AddComponent<EdgeAIModule>();

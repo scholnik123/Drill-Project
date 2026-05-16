@@ -36,14 +36,21 @@ namespace SCADASim.Physics
         private bool hasActiveSupervisorTask;
         private SupervisorTask activeSupervisorTask;
         private float activeSupervisorTaskStartedAt;
+        private float activeSupervisorTaskStableSeconds;
+        private float lastSupervisorTaskEvaluationClock;
         private float supervisorClockSeconds;
         private int supervisorTaskSequence;
         private int companyCredits;
+        private float economyEarnAccumulator;
+        private float economyCostAccumulator;
+        private int performanceCredits;
+        private int operatingCostCredits;
         private int successfulSupervisorTasks;
         private int failedSupervisorTasks;
         private bool simulationStateWasSetExplicitly;
         private bool hasLastSupervisorTaskType;
         private SupervisorTaskType lastSupervisorTaskType;
+        private bool hasOpeningTaskBeenIssued;
         private SimulationRuntimeConfig runtimeConfig = SimulationRuntimeConfig.Default;
         private CrewManager subscribedCrew;
 
@@ -53,8 +60,11 @@ namespace SCADASim.Physics
         public bool IsSimulating { get; private set; }
         public float SimulationSpeedMultiplier => simulationSpeedMultiplier;
         public int CompanyCredits => companyCredits;
+        public int PerformanceCredits => performanceCredits;
+        public int OperatingCostCredits => operatingCostCredits;
         public int SuccessfulSupervisorTasks => successfulSupervisorTasks;
         public int FailedSupervisorTasks => failedSupervisorTasks;
+        public float ActiveSupervisorTaskStableSeconds => activeSupervisorTaskStableSeconds;
         public float ActiveSupervisorTaskRemainingMinutes
         {
             get
@@ -110,6 +120,91 @@ namespace SCADASim.Physics
         public void SetSupervisorCadenceMultiplier(float multiplier)
         {
             supervisorCadenceMultiplier = Mathf.Clamp(multiplier, 0.55f, 1.8f);
+        }
+
+        public DrillingModelSaveData CaptureSaveData()
+        {
+            return new DrillingModelSaveData
+            {
+                State = state,
+                BitBallingRiskBias = bitBallingRiskBias,
+                WallSloughingRiskBias = wallSloughingRiskBias,
+                LostCirculationBias = lostCirculationBias,
+                GasInfluxBias = gasInfluxBias,
+                CommandRampEnergy = commandRampEnergy,
+                NextIncidentCheckTime = nextIncidentCheckTime,
+                LastIncidentTime = lastIncidentTime,
+                NextSupervisorTaskTime = nextSupervisorTaskTime,
+                SupervisorCadenceMultiplier = supervisorCadenceMultiplier,
+                HasActiveSupervisorTask = hasActiveSupervisorTask,
+                ActiveSupervisorTask = activeSupervisorTask,
+                ActiveSupervisorTaskStartedAt = activeSupervisorTaskStartedAt,
+                ActiveSupervisorTaskStableSeconds = activeSupervisorTaskStableSeconds,
+                LastSupervisorTaskEvaluationClock = lastSupervisorTaskEvaluationClock,
+                SupervisorClockSeconds = supervisorClockSeconds,
+                SupervisorTaskSequence = supervisorTaskSequence,
+                CompanyCredits = companyCredits,
+                EconomyEarnAccumulator = economyEarnAccumulator,
+                EconomyCostAccumulator = economyCostAccumulator,
+                PerformanceCredits = performanceCredits,
+                OperatingCostCredits = operatingCostCredits,
+                SuccessfulSupervisorTasks = successfulSupervisorTasks,
+                FailedSupervisorTasks = failedSupervisorTasks,
+                HasLastSupervisorTaskType = hasLastSupervisorTaskType,
+                LastSupervisorTaskType = lastSupervisorTaskType,
+                HasOpeningTaskBeenIssued = hasOpeningTaskBeenIssued,
+                IsSimulating = IsSimulating,
+                SimulationSpeedMultiplier = simulationSpeedMultiplier
+            };
+        }
+
+        public void RestoreSaveData(DrillingModelSaveData saveData)
+        {
+            state = saveData.State;
+            bitBallingRiskBias = saveData.BitBallingRiskBias;
+            wallSloughingRiskBias = saveData.WallSloughingRiskBias;
+            lostCirculationBias = saveData.LostCirculationBias;
+            gasInfluxBias = saveData.GasInfluxBias;
+            commandRampEnergy = saveData.CommandRampEnergy;
+            nextIncidentCheckTime = Mathf.Max(Time.time + 3f, saveData.NextIncidentCheckTime);
+            lastIncidentTime = saveData.LastIncidentTime;
+            nextSupervisorTaskTime = saveData.NextSupervisorTaskTime;
+            supervisorCadenceMultiplier = Mathf.Clamp(saveData.SupervisorCadenceMultiplier, 0.55f, 1.8f);
+            hasActiveSupervisorTask = saveData.HasActiveSupervisorTask;
+            activeSupervisorTask = saveData.ActiveSupervisorTask;
+            activeSupervisorTaskStartedAt = saveData.ActiveSupervisorTaskStartedAt;
+            activeSupervisorTaskStableSeconds = Mathf.Max(0f, saveData.ActiveSupervisorTaskStableSeconds);
+            lastSupervisorTaskEvaluationClock = Mathf.Max(0f, saveData.LastSupervisorTaskEvaluationClock);
+            supervisorClockSeconds = Mathf.Max(0f, saveData.SupervisorClockSeconds);
+            supervisorTaskSequence = Mathf.Max(0, saveData.SupervisorTaskSequence);
+            companyCredits = saveData.CompanyCredits;
+            economyEarnAccumulator = Mathf.Max(0f, saveData.EconomyEarnAccumulator);
+            economyCostAccumulator = Mathf.Max(0f, saveData.EconomyCostAccumulator);
+            performanceCredits = saveData.PerformanceCredits;
+            operatingCostCredits = saveData.OperatingCostCredits;
+            successfulSupervisorTasks = Mathf.Max(0, saveData.SuccessfulSupervisorTasks);
+            failedSupervisorTasks = Mathf.Max(0, saveData.FailedSupervisorTasks);
+            hasLastSupervisorTaskType = saveData.HasLastSupervisorTaskType;
+            lastSupervisorTaskType = saveData.LastSupervisorTaskType;
+            hasOpeningTaskBeenIssued = saveData.HasOpeningTaskBeenIssued;
+            simulationSpeedMultiplier = Mathf.Clamp(saveData.SimulationSpeedMultiplier, 0.25f, 20f);
+            SetSimulating(saveData.IsSimulating);
+
+            StateUpdated?.Invoke(state);
+            if (hasActiveSupervisorTask)
+            {
+                eventChannel?.Raise(
+                    SimulationEventType.SupervisorTask,
+                    AlertSeverity.Advisory,
+                    $"{activeSupervisorTask.Title}: {activeSupervisorTask.Objective}",
+                    activeSupervisorTask);
+            }
+        }
+
+        public bool TryGetActiveSupervisorTask(out SupervisorTask task)
+        {
+            task = activeSupervisorTask;
+            return hasActiveSupervisorTask;
         }
 
         public void SetCrewManager(CrewManager crew)
@@ -179,8 +274,6 @@ namespace SCADASim.Physics
 
                 case CrewActionType.KickControl:
                     gasInfluxBias = Mathf.Clamp01(gasInfluxBias - 0.28f * quality);
-                    state.ChokeOpening01 = Mathf.Clamp01(state.ChokeOpening01 - 0.08f * quality);
-                    state.MudWeightSG = Mathf.Clamp(state.MudWeightSG + 0.025f * quality, 0.95f, 1.55f);
                     break;
 
                 case CrewActionType.LossControl:
@@ -275,11 +368,18 @@ namespace SCADASim.Physics
         private void ResetSupervisorTasks(float delaySeconds)
         {
             hasActiveSupervisorTask = false;
+            activeSupervisorTaskStableSeconds = 0f;
+            lastSupervisorTaskEvaluationClock = 0f;
             hasLastSupervisorTaskType = false;
+            hasOpeningTaskBeenIssued = false;
             supervisorTaskSequence = 0;
             supervisorClockSeconds = 0f;
-            nextSupervisorTaskTime = supervisorClockSeconds + delaySeconds;
+            nextSupervisorTaskTime = supervisorClockSeconds + Mathf.Max(4f, delaySeconds + UnityEngine.Random.Range(4f, 22f));
             companyCredits = 0;
+            economyEarnAccumulator = 0f;
+            economyCostAccumulator = 0f;
+            performanceCredits = 0;
+            operatingCostCredits = 0;
             successfulSupervisorTasks = 0;
             failedSupervisorTasks = 0;
         }
@@ -383,6 +483,7 @@ namespace SCADASim.Physics
                 deltaTime * 0.08f);
             commandRampEnergy = Mathf.MoveTowards(commandRampEnergy, 0f, deltaTime * 0.08f);
 
+            EvaluateEconomy(state, deltaTime);
             EvaluateOperationalIncidents(state);
             EvaluateSupervisorTasks(state);
 
@@ -392,6 +493,57 @@ namespace SCADASim.Physics
                 AlertSeverity.Info,
                 "Drilling state updated.",
                 state);
+        }
+
+        private void EvaluateEconomy(DrillingState current, float deltaTime)
+        {
+            DifficultyTuning tuning = DifficultyProfile.Get(runtimeConfig.Difficulty);
+            float simulatedMinutes = Mathf.Max(0f, deltaTime) / 60f;
+            if (simulatedMinutes <= 0f)
+            {
+                return;
+            }
+
+            float pressureLowMargin = current.BottomHolePressureMPa - current.PorePressureMPa;
+            float pressureHighMargin = current.FracturePressureMPa - current.BottomHolePressureMPa;
+            float pressureQuality = pressureLowMargin > MinRequired(0.15f) && pressureHighMargin > MinRequired(0.25f)
+                ? 1f
+                : 0.35f;
+            float risk01 = Mathf.Max(
+                current.KickRisk01,
+                current.LostCirculationRisk01,
+                Mathf.Max(current.StuckPipeRisk01, current.BoreholeInstabilityRisk01));
+            float progressQuality = Mathf.InverseLerp(4f, 22f, current.RopMPerHour) *
+                                    Mathf.Lerp(0.35f, 1.0f, current.CuttingsTransportEfficiency01) *
+                                    Mathf.Lerp(1f, 0.45f, current.BitWear01) *
+                                    pressureQuality *
+                                    (1f - risk01 * 0.45f);
+            float performanceCreditsPerMinute = Mathf.Clamp(progressQuality, 0f, 1.2f) *
+                                                 Mathf.Lerp(1.15f, 0.78f, Mathf.InverseLerp(0.72f, 1.45f, tuning.CorridorMultiplier)) *
+                                                 tuning.CreditMultiplier;
+            economyEarnAccumulator += performanceCreditsPerMinute * simulatedMinutes;
+            int earned = Mathf.FloorToInt(economyEarnAccumulator);
+            if (earned > 0)
+            {
+                economyEarnAccumulator -= earned;
+                performanceCredits += earned;
+                companyCredits += earned;
+            }
+
+            float fatigue = crewManager != null ? crewManager.GetInfluence().Fatigue : 0f;
+            float costCreditsPerMinute = 0.18f +
+                                         risk01 * 0.85f +
+                                         fatigue * 0.22f +
+                                         Mathf.Clamp01(commandRampEnergy) * 0.18f +
+                                         (current.RopMPerHour < 1f ? 0.34f : 0f);
+            economyCostAccumulator += costCreditsPerMinute * simulatedMinutes;
+            int spent = Mathf.FloorToInt(economyCostAccumulator);
+            if (spent > 0)
+            {
+                economyCostAccumulator -= spent;
+                operatingCostCredits += spent;
+                companyCredits -= spent;
+            }
         }
 
         private static float BlendSensor(float current, float target, float deltaTime, float responsePerSecond)
@@ -683,27 +835,120 @@ namespace SCADASim.Physics
                 return;
             }
 
-            if (current.KickRisk01 > 0.74f)
+            LithologyZone zone = geologyModel.GetZone(current.MeasuredDepth);
+            DifficultyTuning tuning = DifficultyProfile.Get(runtimeConfig.Difficulty);
+            float violationMultiplier = Mathf.Max(0.25f, tuning.IncidentThresholdMultiplier);
+            float flowIn = Mathf.Max(0.1f, current.FlowRateLps);
+            float flowBalancePercent = (current.FlowOutLps - current.FlowRateLps) / flowIn * 100f;
+            float lowPressureMargin = current.BottomHolePressureMPa - current.PorePressureMPa;
+            float highPressureMargin = current.FracturePressureMPa - current.BottomHolePressureMPa;
+            float vibrationG = current.Vibration.LowFrequencyEnergy * 3.5f;
+            float horizontalFactor = Mathf.InverseLerp(35f, 86f, current.InclinationDegrees);
+            float shaleFactor = current.Lithology == LithologyType.Shale || current.Lithology == LithologyType.Salt
+                ? 1f
+                : 0f;
+
+            bool permeableReservoir = zone.PermeabilityMd > 35f || current.GasUnitsPercent > 3f;
+            bool kickViolation =
+                permeableReservoir &&
+                (lowPressureMargin < -0.04f * violationMultiplier ||
+                 current.KickRisk01 > 0.72f * violationMultiplier ||
+                 (flowBalancePercent > 4.2f * violationMultiplier && current.GasUnitsPercent > 2.8f * violationMultiplier));
+            if (kickViolation)
             {
                 RaiseOperationalIncident(BuildOperationalIncident(OperationalIncidentType.Kick, current));
                 return;
             }
 
-            if (current.LostCirculationRisk01 > 0.72f)
+            bool weakFormation = zone.FractureGradientSG < 1.66f || zone.Porosity01 > 0.18f;
+            bool lossViolation =
+                weakFormation &&
+                (highPressureMargin < -0.06f * violationMultiplier ||
+                 current.LostCirculationRisk01 > 0.7f * violationMultiplier ||
+                 flowBalancePercent < -5.5f * violationMultiplier);
+            if (lossViolation)
             {
                 RaiseOperationalIncident(BuildOperationalIncident(OperationalIncidentType.LostCirculation, current));
                 return;
             }
 
-            List<WeightedIncidentCandidate> candidates = BuildOperationalIncidentCandidates(current);
-            float rollProbability = CalculateOperationalIncidentProbability(current, candidates);
-            if (candidates.Count == 0 || UnityEngine.Random.value > rollProbability)
+            bool stuckViolation =
+                (zone.Stickiness01 > 0.42f || horizontalFactor > 0.45f) &&
+                current.StuckPipeRisk01 > 0.68f * violationMultiplier &&
+                current.DragTonnes > 28f * violationMultiplier;
+            if (stuckViolation)
             {
+                RaiseOperationalIncident(BuildOperationalIncident(OperationalIncidentType.DifferentialSticking, current));
                 return;
             }
 
-            OperationalIncidentType selectedType = ChooseWeightedIncident(candidates);
-            RaiseOperationalIncident(BuildOperationalIncident(selectedType, current));
+            bool packOffViolation =
+                current.CuttingsTransportEfficiency01 < 0.45f / violationMultiplier &&
+                current.StandpipePressureBar > 125f * violationMultiplier &&
+                (horizontalFactor > 0.35f || zone.Stickiness01 > 0.45f);
+            if (packOffViolation)
+            {
+                RaiseOperationalIncident(BuildOperationalIncident(OperationalIncidentType.PackOff, current));
+                return;
+            }
+
+            bool wallViolation =
+                shaleFactor > 0f &&
+                current.BoreholeInstabilityRisk01 > 0.62f * violationMultiplier &&
+                (Mathf.Abs(flowBalancePercent) > 4.5f * violationMultiplier || highPressureMargin < 0.18f / violationMultiplier);
+            if (wallViolation)
+            {
+                RaiseOperationalIncident(BuildOperationalIncident(OperationalIncidentType.WallSloughing, current));
+                return;
+            }
+
+            bool gasCutViolation =
+                current.GasUnitsPercent > 5.2f * violationMultiplier &&
+                lowPressureMargin < 0.22f / violationMultiplier &&
+                permeableReservoir;
+            if (gasCutViolation)
+            {
+                RaiseOperationalIncident(BuildOperationalIncident(OperationalIncidentType.GasCutMud, current));
+                return;
+            }
+
+            bool topDriveViolation =
+                current.SurfaceTorqueKnM > 50f * violationMultiplier &&
+                vibrationG > 2.6f * violationMultiplier &&
+                (current.Rpm > 140f || commandRampEnergy > 0.9f * violationMultiplier);
+            if (topDriveViolation)
+            {
+                RaiseOperationalIncident(BuildOperationalIncident(OperationalIncidentType.TopDriveOverload, current));
+                return;
+            }
+
+            bool stickSlipViolation =
+                vibrationG > 3.0f * violationMultiplier &&
+                current.Vibration.LowFrequencyEnergy > 0.66f * violationMultiplier &&
+                current.WeightOnBitTonnes > 10f;
+            if (stickSlipViolation)
+            {
+                RaiseOperationalIncident(BuildOperationalIncident(OperationalIncidentType.StickSlip, current));
+                return;
+            }
+
+            bool shakerViolation =
+                current.CuttingsTransportEfficiency01 < 0.5f / violationMultiplier &&
+                current.FlowRateLps > 48f * violationMultiplier &&
+                horizontalFactor > 0.25f;
+            if (shakerViolation)
+            {
+                RaiseOperationalIncident(BuildOperationalIncident(OperationalIncidentType.ShakerOverflow, current));
+                return;
+            }
+
+            bool bitViolation =
+                current.BitWear01 > 0.82f * violationMultiplier &&
+                (vibrationG > 2.1f * violationMultiplier || zone.Abrasiveness01 > 0.75f);
+            if (bitViolation)
+            {
+                RaiseOperationalIncident(BuildOperationalIncident(OperationalIncidentType.BitWearLimit, current));
+            }
         }
 
         private List<WeightedIncidentCandidate> BuildOperationalIncidentCandidates(DrillingState current)
@@ -858,7 +1103,7 @@ namespace SCADASim.Physics
                     return new OperationalIncident(
                         type,
                         AlertSeverity.Advisory,
-                        "Потеря MWD-сигнала",
+                        "Потеря сигнала ННБ",
                         $"{depthContext} В наклонном/глубоком интервале ухудшилась телеметрия ННБ, траектория требует подтверждения.",
                         "Снизить темп, запросить контрольный замер, не продолжать агрессивный набор угла без данных. Простои +6 мин.",
                         current.MeasuredDepth);
@@ -976,10 +1221,19 @@ namespace SCADASim.Physics
             if (hasActiveSupervisorTask)
             {
                 float elapsedSeconds = Mathf.Max(0f, supervisorClockSeconds - activeSupervisorTaskStartedAt);
-                if (elapsedSeconds >= activeSupervisorTask.MinimumHoldSeconds &&
-                    IsSupervisorTaskSuccessful(activeSupervisorTask, current, out string successSummary))
+                float evaluationDeltaSeconds = Mathf.Clamp(supervisorClockSeconds - lastSupervisorTaskEvaluationClock, 0f, 3f);
+                lastSupervisorTaskEvaluationClock = supervisorClockSeconds;
+
+                bool criteriaMet = IsSupervisorTaskSuccessful(activeSupervisorTask, current, out string criteriaSummary);
+                activeSupervisorTaskStableSeconds = criteriaMet
+                    ? Mathf.Min(activeSupervisorTask.MinimumHoldSeconds, activeSupervisorTaskStableSeconds + evaluationDeltaSeconds)
+                    : 0f;
+
+                if (elapsedSeconds >= 0.5f &&
+                    criteriaMet &&
+                    activeSupervisorTaskStableSeconds >= activeSupervisorTask.MinimumHoldSeconds)
                 {
-                    CompleteSupervisorTask(true, successSummary);
+                    CompleteSupervisorTask(true, $"{criteriaSummary} Цель удержана {activeSupervisorTaskStableSeconds:0}/{activeSupervisorTask.MinimumHoldSeconds:0} сек вручную.");
                     return;
                 }
 
@@ -1002,6 +1256,8 @@ namespace SCADASim.Physics
             activeSupervisorTask = task;
             hasActiveSupervisorTask = true;
             activeSupervisorTaskStartedAt = supervisorClockSeconds;
+            activeSupervisorTaskStableSeconds = 0f;
+            lastSupervisorTaskEvaluationClock = supervisorClockSeconds;
             nextSupervisorTaskTime = supervisorClockSeconds + task.DeadlineMinutes * 60f;
 
             eventChannel?.Raise(
@@ -1038,12 +1294,38 @@ namespace SCADASim.Physics
                 companyCredits);
 
             hasActiveSupervisorTask = false;
+            activeSupervisorTaskStableSeconds = 0f;
 
             eventChannel?.Raise(
                 SimulationEventType.SupervisorTaskResult,
                 succeeded ? AlertSeverity.Advisory : AlertSeverity.Warning,
                 result.Summary,
                 result);
+        }
+
+        private float GetCorridorMultiplier()
+        {
+            return Mathf.Max(0.35f, DifficultyProfile.Get(runtimeConfig.Difficulty).CorridorMultiplier);
+        }
+
+        private float MaxAllowed(float baseValue)
+        {
+            return baseValue * GetCorridorMultiplier();
+        }
+
+        private float MinRequired(float baseValue)
+        {
+            return baseValue / GetCorridorMultiplier();
+        }
+
+        private float MaxAllowed01(float baseValue)
+        {
+            return Mathf.Clamp01(baseValue * GetCorridorMultiplier());
+        }
+
+        private float MinRequired01(float baseValue)
+        {
+            return Mathf.Clamp01(1f - (1f - baseValue) * GetCorridorMultiplier());
         }
 
         private bool IsSupervisorTaskSuccessful(
@@ -1054,8 +1336,8 @@ namespace SCADASim.Physics
             float flowIn = Mathf.Max(0.1f, current.FlowRateLps);
             float flowBalancePercent = (current.FlowOutLps - current.FlowRateLps) / flowIn * 100f;
             float vibrationG = current.Vibration.LowFrequencyEnergy * 3.5f;
-            bool pressureWindowSafe = current.BottomHolePressureMPa > current.PorePressureMPa + 0.15f &&
-                                      current.BottomHolePressureMPa < current.FracturePressureMPa - 0.25f;
+            bool pressureWindowSafe = current.BottomHolePressureMPa > current.PorePressureMPa + MinRequired(0.15f) &&
+                                      current.BottomHolePressureMPa < current.FracturePressureMPa - MinRequired(0.25f);
             float pressureMarginLow = current.BottomHolePressureMPa - current.PorePressureMPa;
             float pressureMarginHigh = current.FracturePressureMPa - current.BottomHolePressureMPa;
             CrewInfluence crew = GetCrewInfluenceOrDefault();
@@ -1064,9 +1346,9 @@ namespace SCADASim.Physics
             {
                 case SupervisorTaskType.KickControl:
                 {
-                    bool ok = flowBalancePercent <= 3f &&
-                              current.GasUnitsPercent < 6f &&
-                              current.BottomHolePressureMPa > current.PorePressureMPa + 0.25f &&
+                    bool ok = flowBalancePercent <= MaxAllowed(3f) &&
+                              current.GasUnitsPercent < MaxAllowed(6f) &&
+                              current.BottomHolePressureMPa > current.PorePressureMPa + MinRequired(0.25f) &&
                               pressureWindowSafe;
                     summary = ok
                         ? $"Приток стабилизирован: баланс выхода {flowBalancePercent:+0.0;-0.0;0.0}%, газ {current.GasUnitsPercent:0.0}%, забойное давление выше пластового."
@@ -1077,7 +1359,7 @@ namespace SCADASim.Physics
                 case SupervisorTaskType.LossControl:
                 {
                     float sppRise = current.StandpipePressureBar - task.BaselineStandpipePressureBar;
-                    bool ok = flowBalancePercent >= -5f && sppRise < 12f && current.LostCirculationRisk01 < 0.42f;
+                    bool ok = flowBalancePercent >= -MaxAllowed(5f) && sppRise < MaxAllowed(12f) && current.LostCirculationRisk01 < MaxAllowed01(0.42f);
                     summary = ok
                         ? $"Поглощение стабилизировано: баланс выхода {flowBalancePercent:+0.0;-0.0;0.0}%, давление насоса +{sppRise:0.0} бар."
                         : $"Не выполнено: баланс выхода {flowBalancePercent:+0.0;-0.0;0.0}%, давление насоса +{sppRise:0.0} бар, риск {current.LostCirculationRisk01 * 100f:0}%.";
@@ -1086,7 +1368,7 @@ namespace SCADASim.Physics
 
                 case SupervisorTaskType.DirectionalDrag:
                 {
-                    bool ok = current.DragTonnes < 35f && current.CuttingsTransportEfficiency01 > 0.65f && current.StuckPipeRisk01 < 0.58f;
+                    bool ok = current.DragTonnes < MaxAllowed(35f) && current.CuttingsTransportEfficiency01 > MinRequired01(0.65f) && current.StuckPipeRisk01 < MaxAllowed01(0.58f);
                     summary = ok
                         ? $"Направленный участок под контролем: сопротивление движению {current.DragTonnes:0.0} т, очистка {current.CuttingsTransportEfficiency01 * 100f:0}%."
                         : $"Не выполнено: сопротивление движению {current.DragTonnes:0.0} т, очистка {current.CuttingsTransportEfficiency01 * 100f:0}%, риск прихвата {current.StuckPipeRisk01 * 100f:0}%.";
@@ -1096,7 +1378,7 @@ namespace SCADASim.Physics
                 case SupervisorTaskType.HoleCleaning:
                 {
                     float sppRise = current.StandpipePressureBar - task.BaselineStandpipePressureBar;
-                    bool ok = current.CuttingsTransportEfficiency01 > 0.7f && sppRise < 12f && vibrationG < 2.2f;
+                    bool ok = current.CuttingsTransportEfficiency01 > MinRequired01(0.7f) && sppRise < MaxAllowed(12f) && vibrationG < MaxAllowed(2.2f);
                     summary = ok
                         ? $"Промывка эффективна: очистка {current.CuttingsTransportEfficiency01 * 100f:0}%, давление насоса +{sppRise:0.0} бар."
                         : $"Не выполнено: очистка {current.CuttingsTransportEfficiency01 * 100f:0}%, давление насоса +{sppRise:0.0} бар, вибрация {vibrationG:0.0} g.";
@@ -1106,8 +1388,8 @@ namespace SCADASim.Physics
                 case SupervisorTaskType.ShaleStability:
                 {
                     bool ok = pressureWindowSafe &&
-                              current.BoreholeInstabilityRisk01 < 0.55f &&
-                              Mathf.Abs(flowBalancePercent) < 5f;
+                              current.BoreholeInstabilityRisk01 < MaxAllowed01(0.55f) &&
+                              Mathf.Abs(flowBalancePercent) < MaxAllowed(5f);
                     summary = ok
                         ? $"Глинистый интервал пройден стабильно: эквив. плотность {current.EquivalentCirculatingDensitySG:0.00}, осыпь {current.BoreholeInstabilityRisk01 * 100f:0}%."
                         : $"Не выполнено: эквив. плотность {current.EquivalentCirculatingDensitySG:0.00}, осыпь {current.BoreholeInstabilityRisk01 * 100f:0}%, баланс {flowBalancePercent:+0.0;-0.0;0.0}%.";
@@ -1119,7 +1401,7 @@ namespace SCADASim.Physics
                     float torqueRisePercent = task.BaselineTorqueKnM > 0.1f
                         ? (current.SurfaceTorqueKnM - task.BaselineTorqueKnM) / task.BaselineTorqueKnM * 100f
                         : 0f;
-                    bool ok = vibrationG < 2.2f && torqueRisePercent < 20f && current.RopMPerHour >= 8f;
+                    bool ok = vibrationG < MaxAllowed(2.2f) && torqueRisePercent < MaxAllowed(20f) && current.RopMPerHour >= MinRequired(8f);
                     summary = ok
                         ? $"Долото сохранено: вибрация {vibrationG:0.0} g, момент {torqueRisePercent:+0;-0;0}% к базовому, скорость {current.RopMPerHour:0.0} м/ч."
                         : $"Не выполнено: вибрация {vibrationG:0.0} g, момент {torqueRisePercent:+0;-0;0}%, скорость {current.RopMPerHour:0.0} м/ч.";
@@ -1128,9 +1410,9 @@ namespace SCADASim.Physics
 
                 case SupervisorTaskType.PressureWindow:
                 {
-                    bool ok = pressureMarginLow > 0.25f &&
-                              pressureMarginHigh > 0.45f &&
-                              Mathf.Abs(flowBalancePercent) < 4f;
+                    bool ok = pressureMarginLow > MinRequired(0.25f) &&
+                              pressureMarginHigh > MinRequired(0.45f) &&
+                              Mathf.Abs(flowBalancePercent) < MaxAllowed(4f);
                     summary = ok
                         ? $"Окно давлений удержано: запас к пластовому {pressureMarginLow:0.0} МПа, запас до гидроразрыва {pressureMarginHigh:0.0} МПа."
                         : $"Не выполнено: запас к пластовому {pressureMarginLow:0.0} МПа, до гидроразрыва {pressureMarginHigh:0.0} МПа, баланс {flowBalancePercent:+0.0;-0.0;0.0}%.";
@@ -1139,9 +1421,9 @@ namespace SCADASim.Physics
 
                 case SupervisorTaskType.CrewHandover:
                 {
-                    bool ok = crew.Fatigue < 0.58f &&
-                              crew.ProcedureDiscipline01 > 0.55f &&
-                              crew.ShiftCoordination01 > 0.55f;
+                    bool ok = crew.Fatigue < MaxAllowed01(0.58f) &&
+                              crew.ProcedureDiscipline01 > MinRequired01(0.55f) &&
+                              crew.ShiftCoordination01 > MinRequired01(0.55f);
                     summary = ok
                         ? $"Пересменка подготовлена: усталость {crew.Fatigue * 100f:0}%, дисциплина {crew.ProcedureDiscipline01 * 100f:0}%, координация {crew.ShiftCoordination01 * 100f:0}%."
                         : $"Не выполнено: усталость {crew.Fatigue * 100f:0}%, дисциплина {crew.ProcedureDiscipline01 * 100f:0}%, координация {crew.ShiftCoordination01 * 100f:0}%.";
@@ -1151,10 +1433,10 @@ namespace SCADASim.Physics
                 case SupervisorTaskType.PumpEfficiency:
                 {
                     float sppRise = current.StandpipePressureBar - task.BaselineStandpipePressureBar;
-                    bool ok = current.CuttingsTransportEfficiency01 > 0.64f &&
-                              sppRise < 18f &&
-                              Mathf.Abs(flowBalancePercent) < 6f &&
-                              vibrationG < 2.4f;
+                    bool ok = current.CuttingsTransportEfficiency01 > MinRequired01(0.64f) &&
+                              sppRise < MaxAllowed(18f) &&
+                              Mathf.Abs(flowBalancePercent) < MaxAllowed(6f) &&
+                              vibrationG < MaxAllowed(2.4f);
                     summary = ok
                         ? $"Насосный режим эффективен: очистка {current.CuttingsTransportEfficiency01 * 100f:0}%, давление насоса +{sppRise:0.0} бар."
                         : $"Не выполнено: очистка {current.CuttingsTransportEfficiency01 * 100f:0}%, давление насоса +{sppRise:0.0} бар, баланс {flowBalancePercent:+0.0;-0.0;0.0}%.";
@@ -1163,9 +1445,9 @@ namespace SCADASim.Physics
 
                 case SupervisorTaskType.GasMonitoring:
                 {
-                    bool ok = current.GasUnitsPercent < 4.5f &&
-                              current.KickRisk01 < 0.45f &&
-                              current.BottomHolePressureMPa > current.PorePressureMPa + 0.22f;
+                    bool ok = current.GasUnitsPercent < MaxAllowed(4.5f) &&
+                              current.KickRisk01 < MaxAllowed01(0.45f) &&
+                              current.BottomHolePressureMPa > current.PorePressureMPa + MinRequired(0.22f);
                     summary = ok
                         ? $"Газовый тренд стабилен: газ {current.GasUnitsPercent:0.0}%, риск притока {current.KickRisk01 * 100f:0}%, запас к пластовому {pressureMarginLow:0.0} МПа."
                         : $"Не выполнено: газ {current.GasUnitsPercent:0.0}%, риск притока {current.KickRisk01 * 100f:0}%, запас к пластовому {pressureMarginLow:0.0} МПа.";
@@ -1174,21 +1456,21 @@ namespace SCADASim.Physics
 
                 case SupervisorTaskType.ToolfaceControl:
                 {
-                    bool ok = current.DoglegSeverityDegPer30m < 7f &&
-                              current.DragTonnes < 34f &&
-                              vibrationG < 2.4f;
+                    bool ok = current.DoglegSeverityDegPer30m < MaxAllowed(7f) &&
+                              current.DragTonnes < MaxAllowed(34f) &&
+                              vibrationG < MaxAllowed(2.4f);
                     summary = ok
-                        ? $"Toolface удержан: dogleg {current.DoglegSeverityDegPer30m:0.0}°/30 м, drag {current.DragTonnes:0.0} т, вибрация {vibrationG:0.0} g."
-                        : $"Не выполнено: dogleg {current.DoglegSeverityDegPer30m:0.0}°/30 м, drag {current.DragTonnes:0.0} т, вибрация {vibrationG:0.0} g.";
+                        ? $"Положение отклонителя удержано: искривление {current.DoglegSeverityDegPer30m:0.0}°/30 м, сопротивление {current.DragTonnes:0.0} т, вибрация {vibrationG:0.0} g."
+                        : $"Не выполнено: искривление {current.DoglegSeverityDegPer30m:0.0}°/30 м, сопротивление {current.DragTonnes:0.0} т, вибрация {vibrationG:0.0} g.";
                     return ok;
                 }
 
                 case SupervisorTaskType.PumpIntegrity:
                 {
                     float sppRise = current.StandpipePressureBar - task.BaselineStandpipePressureBar;
-                    bool ok = sppRise < 10f &&
-                              Mathf.Abs(flowBalancePercent) < 6f &&
-                              current.CuttingsTransportEfficiency01 > 0.6f;
+                    bool ok = sppRise < MaxAllowed(10f) &&
+                              Mathf.Abs(flowBalancePercent) < MaxAllowed(6f) &&
+                              current.CuttingsTransportEfficiency01 > MinRequired01(0.6f);
                     summary = ok
                         ? $"Насосы подтверждены: давление +{sppRise:0.0} бар, баланс {flowBalancePercent:+0.0;-0.0;0.0}%, очистка {current.CuttingsTransportEfficiency01 * 100f:0}%."
                         : $"Не выполнено: давление +{sppRise:0.0} бар, баланс {flowBalancePercent:+0.0;-0.0;0.0}%, очистка {current.CuttingsTransportEfficiency01 * 100f:0}%.";
@@ -1197,9 +1479,9 @@ namespace SCADASim.Physics
 
                 case SupervisorTaskType.EquipmentInspection:
                 {
-                    bool ok = crew.MaintenanceReadiness01 > 0.58f &&
-                              vibrationG < 2.5f &&
-                              commandRampEnergy < 0.65f;
+                    bool ok = crew.MaintenanceReadiness01 > MinRequired01(0.58f) &&
+                              vibrationG < MaxAllowed(2.5f) &&
+                              commandRampEnergy < MaxAllowed(0.65f);
                     summary = ok
                         ? $"Оборудование готово: готовность {crew.MaintenanceReadiness01 * 100f:0}%, вибрация {vibrationG:0.0} g, резкость команд низкая."
                         : $"Не выполнено: готовность {crew.MaintenanceReadiness01 * 100f:0}%, вибрация {vibrationG:0.0} g, резкость команд {commandRampEnergy:0.0}.";
@@ -1208,9 +1490,9 @@ namespace SCADASim.Physics
 
                 case SupervisorTaskType.WeatherResponse:
                 {
-                    bool ok = crew.ShiftCoordination01 > 0.55f &&
-                              crew.ProcedureDiscipline01 > 0.55f &&
-                              Mathf.Abs(flowBalancePercent) < 5f;
+                    bool ok = crew.ShiftCoordination01 > MinRequired01(0.55f) &&
+                              crew.ProcedureDiscipline01 > MinRequired01(0.55f) &&
+                              Mathf.Abs(flowBalancePercent) < MaxAllowed(5f);
                     summary = ok
                         ? $"Погодный протокол выдержан: координация {crew.ShiftCoordination01 * 100f:0}%, дисциплина {crew.ProcedureDiscipline01 * 100f:0}%, баланс {flowBalancePercent:+0.0;-0.0;0.0}%."
                         : $"Не выполнено: координация {crew.ShiftCoordination01 * 100f:0}%, дисциплина {crew.ProcedureDiscipline01 * 100f:0}%, баланс {flowBalancePercent:+0.0;-0.0;0.0}%.";
@@ -1219,12 +1501,12 @@ namespace SCADASim.Physics
 
                 case SupervisorTaskType.MwdSurvey:
                 {
-                    bool ok = crew.SituationalAwareness01 > 0.58f &&
-                              current.DoglegSeverityDegPer30m < 8f &&
-                              current.DragTonnes < 36f;
+                    bool ok = crew.SituationalAwareness01 > MinRequired01(0.58f) &&
+                              current.DoglegSeverityDegPer30m < MaxAllowed(8f) &&
+                              current.DragTonnes < MaxAllowed(36f);
                     summary = ok
-                        ? $"MWD-замер подтвержден: осведомленность {crew.SituationalAwareness01 * 100f:0}%, dogleg {current.DoglegSeverityDegPer30m:0.0}°/30 м."
-                        : $"Не выполнено: осведомленность {crew.SituationalAwareness01 * 100f:0}%, dogleg {current.DoglegSeverityDegPer30m:0.0}°/30 м, drag {current.DragTonnes:0.0} т.";
+                        ? $"Инклинометрический замер подтвержден: осведомленность {crew.SituationalAwareness01 * 100f:0}%, искривление {current.DoglegSeverityDegPer30m:0.0}°/30 м."
+                        : $"Не выполнено: осведомленность {crew.SituationalAwareness01 * 100f:0}%, искривление {current.DoglegSeverityDegPer30m:0.0}°/30 м, сопротивление {current.DragTonnes:0.0} т.";
                     return ok;
                 }
 
@@ -1233,9 +1515,9 @@ namespace SCADASim.Physics
                     float torqueRisePercent = task.BaselineTorqueKnM > 0.1f
                         ? (current.SurfaceTorqueKnM - task.BaselineTorqueKnM) / task.BaselineTorqueKnM * 100f
                         : 0f;
-                    bool ok = vibrationG < 2.1f &&
-                              torqueRisePercent < 15f &&
-                              commandRampEnergy < 0.65f;
+                    bool ok = vibrationG < MaxAllowed(2.1f) &&
+                              torqueRisePercent < MaxAllowed(15f) &&
+                              commandRampEnergy < MaxAllowed(0.65f);
                     summary = ok
                         ? $"Момент сглажен: вибрация {vibrationG:0.0} g, момент {torqueRisePercent:+0;-0;0}%, резкость команд {commandRampEnergy:0.0}."
                         : $"Не выполнено: вибрация {vibrationG:0.0} g, момент {torqueRisePercent:+0;-0;0}%, резкость команд {commandRampEnergy:0.0}.";
@@ -1244,9 +1526,9 @@ namespace SCADASim.Physics
 
                 case SupervisorTaskType.ConnectionProcedure:
                 {
-                    bool ok = crew.ProcedureDiscipline01 > 0.58f &&
-                              crew.Fatigue < 0.65f &&
-                              Mathf.Abs(flowBalancePercent) < 6f;
+                    bool ok = crew.ProcedureDiscipline01 > MinRequired01(0.58f) &&
+                              crew.Fatigue < MaxAllowed01(0.65f) &&
+                              Mathf.Abs(flowBalancePercent) < MaxAllowed(6f);
                     summary = ok
                         ? $"Наращивание подготовлено: дисциплина {crew.ProcedureDiscipline01 * 100f:0}%, усталость {crew.Fatigue * 100f:0}%, баланс {flowBalancePercent:+0.0;-0.0;0.0}%."
                         : $"Не выполнено: дисциплина {crew.ProcedureDiscipline01 * 100f:0}%, усталость {crew.Fatigue * 100f:0}%, баланс {flowBalancePercent:+0.0;-0.0;0.0}%.";
@@ -1255,9 +1537,9 @@ namespace SCADASim.Physics
 
                 default:
                 {
-                    bool ok = current.RopMPerHour > 10f &&
-                              vibrationG < 2.2f &&
-                              current.BitWear01 < 0.75f &&
+                    bool ok = current.RopMPerHour > MinRequired(10f) &&
+                              vibrationG < MaxAllowed(2.2f) &&
+                              current.BitWear01 < MaxAllowed01(0.75f) &&
                               pressureWindowSafe;
                     summary = ok
                         ? $"План смены выдержан: скорость {current.RopMPerHour:0.0} м/ч, вибрация {vibrationG:0.0} g, износ {current.BitWear01 * 100f:0}%."
@@ -1348,11 +1630,66 @@ namespace SCADASim.Physics
 
         private SupervisorTask BuildSupervisorTask(DrillingState current, int sequence)
         {
+            if (!hasOpeningTaskBeenIssued)
+            {
+                hasOpeningTaskBeenIssued = true;
+                SupervisorTaskType openingType = ChooseOpeningSupervisorTask(current);
+                hasLastSupervisorTaskType = true;
+                lastSupervisorTaskType = openingType;
+                return TuneSupervisorTask(CreateSupervisorTask(openingType, current));
+            }
+
             List<WeightedTaskCandidate> candidates = BuildSupervisorTaskCandidates(current);
             SupervisorTaskType selectedType = ChooseWeightedTask(candidates);
             hasLastSupervisorTaskType = true;
             lastSupervisorTaskType = selectedType;
-            return CreateSupervisorTask(selectedType, current);
+            return TuneSupervisorTask(CreateSupervisorTask(selectedType, current));
+        }
+
+        private SupervisorTask TuneSupervisorTask(SupervisorTask task)
+        {
+            DifficultyTuning tuning = DifficultyProfile.Get(runtimeConfig.Difficulty);
+            task.MinimumHoldSeconds *= tuning.HoldTimeMultiplier;
+            task.DeadlineMinutes *= Mathf.Lerp(0.88f, 1.18f, Mathf.InverseLerp(0.72f, 1.45f, tuning.CorridorMultiplier));
+            task.RewardCredits = Mathf.RoundToInt(task.RewardCredits * tuning.CreditMultiplier);
+            task.FailurePenaltyCredits = Mathf.RoundToInt(task.FailurePenaltyCredits * Mathf.Lerp(0.75f, 1.35f, Mathf.InverseLerp(1.45f, 0.72f, tuning.CorridorMultiplier)));
+            task.ControlHints = $"{task.ControlHints} Сложность: {tuning.DisplayName}; удерживать цель {task.MinimumHoldSeconds:0} сек вручную.";
+            return task;
+        }
+
+        private SupervisorTaskType ChooseOpeningSupervisorTask(DrillingState current)
+        {
+            List<SupervisorTaskType> openingTasks = new List<SupervisorTaskType>
+            {
+                SupervisorTaskType.PressureWindow,
+                SupervisorTaskType.PumpEfficiency,
+                SupervisorTaskType.EquipmentInspection,
+                SupervisorTaskType.ShiftPlan,
+                SupervisorTaskType.ConnectionProcedure,
+                SupervisorTaskType.MwdSurvey
+            };
+
+            if (current.InclinationDegrees > 35f || runtimeConfig.ProfileType != WellboreProfileType.Vertical)
+            {
+                openingTasks.Add(SupervisorTaskType.DirectionalDrag);
+                openingTasks.Add(SupervisorTaskType.ToolfaceControl);
+            }
+
+            if (runtimeConfig.EnvironmentType == EnvironmentType.Offshore ||
+                runtimeConfig.GeologyRegion == GeologyRegion.ArcticShelf)
+            {
+                openingTasks.Add(SupervisorTaskType.WeatherResponse);
+            }
+
+            if (current.MeasuredDepth > 1200f)
+            {
+                openingTasks.Add(SupervisorTaskType.HoleCleaning);
+                openingTasks.Add(SupervisorTaskType.TorqueSmoothing);
+                openingTasks.Add(SupervisorTaskType.GasMonitoring);
+            }
+
+            int index = UnityEngine.Random.Range(0, openingTasks.Count);
+            return openingTasks[Mathf.Clamp(index, 0, openingTasks.Count - 1)];
         }
 
         private List<WeightedTaskCandidate> BuildSupervisorTaskCandidates(DrillingState current)
@@ -1434,7 +1771,7 @@ namespace SCADASim.Physics
                         "Признаки притока: выход и газ растут. Нужно вернуть скважину к безопасному превышению забойного давления над пластовым без выхода к гидроразрыву.",
                         "Успех: выход не выше входа более чем на 3%, газ <6%, забойное давление выше пластового и ниже гидроразрыва.",
                         "Смотреть: расход вход/выход, газ, забойное и пластовое давление, эквивалентную плотность.",
-                        "Крутилки: прикрыть штуцер, поднять плотность раствора на 0.02-0.05 SG, не разгонять обороты и нагрузку.",
+                        "Параметры: прикрыть штуцер, поднять плотность раствора на 0.02-0.05 SG, не разгонять обороты и нагрузку.",
                         8f,
                         55f,
                         140,
@@ -1448,7 +1785,7 @@ namespace SCADASim.Physics
                         "Емкости проседают: слабый пласт принимает раствор. Нужно снизить динамическую нагрузку на пласт.",
                         "Успех: выход не ниже входа более чем на 5%, давление насоса не выросло больше чем на 12 бар, риск поглощения <42%.",
                         "Смотреть: расход на выходе, давление насоса, эквивалентную плотность, риск поглощения.",
-                        "Крутилки: снизить расход на 100-250 л/мин, открыть штуцер, не поднимать плотность.",
+                        "Параметры: снизить расход на 100-250 л/мин, открыть штуцер, не поднимать плотность.",
                         9f,
                         55f,
                         130,
@@ -1462,7 +1799,7 @@ namespace SCADASim.Physics
                         "В направленном участке растут момент и сопротивление движению колонны. Нужно удержать механику без перехода к прихвату.",
                         "Успех: сопротивление движению <35 т, вынос шлама >65%, риск прихвата <58%.",
                         "Смотреть: момент, нагрузку, зенитный угол, вынос шлама, риск прихвата.",
-                        "Крутилки: не завышать нагрузку на долото, держать расход достаточным, при вибрации снижать обороты.",
+                        "Параметры: не завышать нагрузку на долото, держать расход достаточным, при вибрации снижать обороты.",
                         10f,
                         60f,
                         160,
@@ -1476,7 +1813,7 @@ namespace SCADASim.Physics
                         "Шламовая постель мешает бурению. Нужно поднять очистку, не спровоцировав рост давления.",
                         "Успех: вынос шлама >70%, давление насоса +12 бар максимум, вибрация <2.2 g.",
                         "Смотреть: вынос шлама, давление насоса, вибрацию, расход на выходе.",
-                        "Крутилки: плавно поднять расход, снизить нагрузку и скорость проходки, выполнить промывку ствола бригадой.",
+                        "Параметры: плавно поднять расход, снизить нагрузку и скорость проходки, выполнить промывку ствола бригадой.",
                         7f,
                         45f,
                         120,
@@ -1490,7 +1827,7 @@ namespace SCADASim.Physics
                         "Глинистый интервал чувствителен к давлению и расходу. Нужно пройти без осыпи стенок.",
                         "Успех: эквивалентная плотность в безопасном окне, риск осыпи <55%, баланс расхода в пределах 5%.",
                         "Смотреть: эквивалентную плотность, забойное/пластовое давление, гидроразрыв, риск осыпи, расход вход/выход.",
-                        "Крутилки: держать плотность и штуцер без резких скачков, расход менять малыми шагами.",
+                        "Параметры: держать плотность и штуцер без резких скачков, расход менять малыми шагами.",
                         9f,
                         60f,
                         150,
@@ -1504,7 +1841,7 @@ namespace SCADASim.Physics
                         "Долото теряет эффективность. Нужно сохранить скорость проходки без разрушительной вибрации.",
                         "Успех: вибрация <2.2 g, момент не вырос выше +20%, скорость проходки >=8 м/ч.",
                         "Смотреть: вибрацию, момент, скорость проходки, износ долота.",
-                        "Крутилки: снизить нагрузку и обороты до устойчивого режима, не давить долото насильно.",
+                        "Параметры: снизить нагрузку и обороты до устойчивого режима, не давить долото насильно.",
                         8f,
                         50f,
                         125,
@@ -1518,7 +1855,7 @@ namespace SCADASim.Physics
                         "Проверить окно давлений: нужен запас над пластовым давлением и запас до гидроразрыва.",
                         "Успех: запас над пластовым >0.25 МПа, запас до гидроразрыва >0.45 МПа, баланс расхода в пределах 4%.",
                         "Смотреть: забойное, пластовое и давление гидроразрыва, расход вход/выход.",
-                        "Крутилки: корректировать плотность раствора и штуцер малыми шагами, расход менять плавно.",
+                        "Параметры: корректировать плотность раствора и штуцер малыми шагами, расход менять плавно.",
                         7f,
                         45f,
                         140,
@@ -1546,7 +1883,7 @@ namespace SCADASim.Physics
                         "Начальство просит подтвердить, что расход работает на очистку, а не просто разгоняет давление.",
                         "Успех: вынос шлама >64%, давление насоса +18 бар максимум, баланс расхода в пределах 6%.",
                         "Смотреть: давление насоса, расход вход/выход, вынос шлама, вибрацию.",
-                        "Крутилки: найти умеренный расход, не компенсировать плохую очистку резким ростом оборотов.",
+                        "Параметры: найти умеренный расход, не компенсировать плохую очистку резким ростом оборотов.",
                         7f,
                         50f,
                         125,
@@ -1570,11 +1907,11 @@ namespace SCADASim.Physics
                 case SupervisorTaskType.ToolfaceControl:
                     return new SupervisorTask(
                         type,
-                        "Контроль toolface",
-                        "ННБ сообщает, что направленный инструмент начинает уходить с планового положения.",
+                        "Контроль положения отклонителя",
+                        "Инженер ННБ сообщает, что направленный инструмент начинает уходить с планового положения.",
                         "Успех: резкость набора угла <7°/30 м, сопротивление <34 т, вибрация <2.4 g.",
-                        "Смотреть: зенит, азимут, dogleg, момент и вибрацию.",
-                        "Крутилки: снизить грубую нагрузку, не форсировать обороты, запросить замер ННБ.",
+                        "Смотреть: зенит, азимут, искривление, момент и вибрацию.",
+                        "Параметры: снизить грубую нагрузку, не форсировать обороты, запросить замер ННБ.",
                         8f,
                         50f,
                         135,
@@ -1628,10 +1965,10 @@ namespace SCADASim.Physics
                 case SupervisorTaskType.MwdSurvey:
                     return new SupervisorTask(
                         type,
-                        "Контрольный MWD-замер",
+                        "Контрольный инклинометрический замер",
                         "Траектория и датчики требуют подтверждения, иначе можно уйти от планового ствола.",
-                        "Успех: осведомленность бригады >58%, dogleg <8°/30 м, сопротивление <36 т.",
-                        "Смотреть: зенит, азимут, dogleg, сопротивление движению, осведомленность ННБ.",
+                        "Успех: осведомленность бригады >58%, искривление <8°/30 м, сопротивление <36 т.",
+                        "Смотреть: зенит, азимут, искривление, сопротивление движению, осведомленность ННБ.",
                         "Действия: выполнить замер инклинометрии, держать мягкие параметры до подтверждения.",
                         7f,
                         45f,
@@ -1646,7 +1983,7 @@ namespace SCADASim.Physics
                         "Момент реагирует рывками, возможен stick-slip или перегруз верхнего привода.",
                         "Успех: вибрация <2.1 g, момент не выше +15% к базовому, команды без резких скачков.",
                         "Смотреть: момент, вибрацию, обороты, нагрузку и энергию резких команд.",
-                        "Крутилки: снизить обороты и нагрузку малыми шагами, затем возвращать режим постепенно.",
+                        "Параметры: снизить обороты и нагрузку малыми шагами, затем возвращать режим постепенно.",
                         7f,
                         45f,
                         130,
@@ -1674,7 +2011,7 @@ namespace SCADASim.Physics
                         "Рабочий режим без осложнений: держать скорость проходки, давление и механику в коридоре.",
                         "Успех: скорость проходки >10 м/ч, вибрация <2.2 g, износ <75%, окно давлений безопасное.",
                         "Смотреть: скорость проходки, вибрацию, износ, забойное/пластовое давление и гидроразрыв.",
-                        "Крутилки: оптимизировать обороты и нагрузку, расход держать под очистку, эквив. плотность не выводить за окно.",
+                        "Параметры: оптимизировать обороты и нагрузку, расход держать под очистку, эквивалентную плотность не выводить за окно.",
                         8f,
                         55f,
                         120,
